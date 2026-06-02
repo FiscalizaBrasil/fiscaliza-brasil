@@ -71,7 +71,7 @@ def get_lista_senadores(legislatura: int):
             """
             params: list[object] = []
             if legislatura:
-                query += " WHERE m.primeira_legislatura = %s OR m.segunda_legislatura = %s"
+                query += " WHERE m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text"
                 params.extend([str(legislatura), str(legislatura)])
                 
             query += """
@@ -118,7 +118,7 @@ def get_estatisticas_senado(legislatura: int):
             query_total = "SELECT COUNT(DISTINCT codigo_parlamentar) FROM senado.mandato"
             params: list[object] = []
             if legislatura:
-                query_total += " WHERE primeira_legislatura = %s OR segunda_legislatura = %s"
+                query_total += " WHERE primeira_legislatura::text = %s::text OR segunda_legislatura::text = %s::text"
                 params.extend([str(legislatura), str(legislatura)])
             
             cursor.execute(query_total, tuple(params))
@@ -137,7 +137,7 @@ def get_estatisticas_senado(legislatura: int):
                     INNER JOIN (
                         SELECT DISTINCT codigo_parlamentar
                         FROM senado.mandato
-                        WHERE primeira_legislatura = %s OR segunda_legislatura = %s
+                        WHERE primeira_legislatura::text = %s::text OR segunda_legislatura::text = %s::text
                     ) m ON d.cod_senador = m.codigo_parlamentar
                     WHERE CAST(d.ano AS INTEGER) BETWEEN %s AND %s
                 """
@@ -161,7 +161,7 @@ def get_estatisticas_senado(legislatura: int):
             """
             params_reg = []
             if legislatura:
-                query_regiao += " AND (m.primeira_legislatura = %s OR m.segunda_legislatura = %s)"
+                query_regiao += " AND (m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text)"
                 params_reg.extend([legislatura, legislatura])
                 
             query_regiao += """
@@ -250,7 +250,7 @@ WHERE d.cod_senador IN (%s, %s)
                     AND d.cod_senador IN (
                         SELECT DISTINCT codigo_parlamentar
                         FROM senado.mandato
-                        WHERE primeira_legislatura = %s OR segunda_legislatura = %s
+                        WHERE primeira_legislatura::text = %s::text OR segunda_legislatura::text = %s::text
                     )
                     AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s
                 """
@@ -389,7 +389,7 @@ WHERE codigo = %s;"""
                   AND NULLIF(TRIM(m.uf::text), '') IS NOT NULL
                 ORDER BY
                     CASE
-                        WHEN %s <> 0 AND (m.primeira_legislatura = %s OR m.segunda_legislatura = %s) THEN 0
+                        WHEN %s <> 0 AND (m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text) THEN 0
                         ELSE 1
                     END,
                     m.primeira_legislatura DESC NULLS LAST,
@@ -421,7 +421,7 @@ WHERE codigo = %s;"""
                     AND EXISTS (
                         SELECT 1 FROM senado.mandato m
                         WHERE m.codigo_parlamentar = s.id
-                          AND (m.primeira_legislatura = %s OR m.segunda_legislatura = %s)
+                          AND (m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text)
                     )
                 """
              
@@ -616,7 +616,7 @@ def get_despesas_estatisticas(legislatura: int):
                     INNER JOIN (
                         SELECT DISTINCT codigo_parlamentar
                         FROM senado.mandato
-                        WHERE primeira_legislatura = %s OR segunda_legislatura = %s
+                        WHERE primeira_legislatura::text = %s::text OR segunda_legislatura::text = %s::text
                     ) m ON d.cod_senador = m.codigo_parlamentar
                 """
                 params.extend([legislatura, legislatura, start_year, end_year])
@@ -930,7 +930,7 @@ def get_lista_emendas(
                         SELECT 1
                         FROM senado.mandato m
                         WHERE m.codigo_parlamentar = p.codigo
-                          AND (m.primeira_legislatura = %s OR m.segunda_legislatura = %s)
+                          AND (m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text)
                     )
                 """)
                 params_base.extend([legislatura, legislatura])
@@ -1052,7 +1052,7 @@ def get_resumo_emendas(legislatura: int):
                         SELECT 1
                         FROM senado.mandato m
                         WHERE m.codigo_parlamentar = p.codigo
-                          AND (m.primeira_legislatura = %s OR m.segunda_legislatura = %s)
+                          AND (m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text)
                     )
                 """
                 params_base.extend([start_year, end_year, legislatura, legislatura])
@@ -1251,7 +1251,7 @@ def get_emendas_lista_senador(legislatura: int, senador_codigo: int, pagina: int
                         SELECT 1
                         FROM senado.mandato m
                         WHERE m.codigo_parlamentar = s.codigo
-                          AND (m.primeira_legislatura = %s OR m.segunda_legislatura = %s)
+                          AND (m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text)
                     )
                 """)
                 params_base.extend([legislatura, legislatura])
@@ -1419,7 +1419,7 @@ def get_resumo_principal_senado(legislatura: int = 0):
             query_total = "SELECT COUNT(DISTINCT codigo_parlamentar) FROM senado.mandato"
             params_total: list[object] = []
             if legislatura and legislatura > 0:
-                query_total += " WHERE primeira_legislatura = %s OR segunda_legislatura = %s"
+                query_total += " WHERE primeira_legislatura::text = %s::text OR segunda_legislatura::text = %s::text"
                 params_total.extend([str(legislatura), str(legislatura)])
             
             cursor.execute(query_total, tuple(params_total))
@@ -1445,7 +1445,7 @@ def get_resumo_principal_senado(legislatura: int = 0):
                       AND EXISTS (
                           SELECT 1 FROM senado.mandato m
                           WHERE m.codigo_parlamentar = d.cod_senador
-                            AND (m.primeira_legislatura = %s OR m.segunda_legislatura = %s)
+                            AND (m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text)
                       )
                 """
                 params_gastos.extend([start_year, end_year, str(legislatura), str(legislatura)])
