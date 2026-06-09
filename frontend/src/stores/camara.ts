@@ -137,8 +137,23 @@ export const useCamaraStore = defineStore("camara", () => {
   const legislatura = ref(57)
   const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 
-  const legislaturasDisponiveis = ref<number[]>([57, 56, 55, 54, 53, 52, 51, 50])
+  const legislaturasDisponiveis = ref<number[]>([])
   
+  const fetchMaiorLegislatura = async (): Promise<number | null> => {
+    try {
+      const response = await fetch(`${apiUrl}/api/camara/maior-legislatura`)
+      if (!response.ok) throw new Error("Falha ao buscar maior legislatura")
+      const data = await response.json()
+      if (data && data.maior_legislatura) {
+        return data.maior_legislatura
+      }
+      return null
+    } catch (e: any) {
+      console.error("Erro ao carregar maior legislatura:", e)
+      return null
+    }
+  }
+
   const fetchLegislaturasDisponiveis = async () => {
     try {
       const response = await fetch(`${apiUrl}/api/camara/legislaturas`)
@@ -146,6 +161,11 @@ export const useCamaraStore = defineStore("camara", () => {
       const data = await response.json()
       if (data && data.length > 0) {
         legislaturasDisponiveis.value = data
+        // Define a legislatura padrão como a maior disponível
+        const maior = await fetchMaiorLegislatura()
+        if (maior && legislatura.value !== maior) {
+          legislatura.value = maior
+        }
       }
     } catch (e: any) {
       console.error("Erro ao carregar legislaturas globais:", e)
@@ -188,6 +208,64 @@ export const useCamaraStore = defineStore("camara", () => {
   const projetosLegislativosDistribuicao = ref<{ tipo: string; quantidade: number }[]>([])
   const projetosLegislativosPage = ref(1)
   const hasMoreProjetosLegislativos = ref(true)
+
+  // Scraping status state
+  const scrapingStatus = ref<{
+    em_andamento: boolean
+    camara_pendentes: number
+    senado_pendentes: number
+    camara_completa: boolean
+    senado_completo: boolean
+  } | null>(null)
+
+  // Polling state
+  let pollingTimer: ReturnType<typeof setInterval> | null = null
+
+  const fetchScrapingStatus = async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/scraping-status`)
+      if (!response.ok) throw new Error("Falha ao buscar status do scraping")
+      scrapingStatus.value = await response.json()
+    } catch (e: any) {
+      console.error("Erro ao buscar status do scraping:", e)
+    }
+  }
+
+  const iniciarPollingDeputado = (id: number) => {
+    // Se já tem dados, não precisa de polling
+    if (currentDespesas.value.length > 0 || currentCategorias.value.length > 0) return
+    
+    // Se o scraping já terminou, não precisa de polling
+    if (scrapingStatus.value && !scrapingStatus.value.em_andamento) return
+
+    pararPolling()
+    pollingTimer = setInterval(async () => {
+      // Atualiza status do scraping
+      await fetchScrapingStatus()
+      
+      // Se o scraping terminou, faz uma última recarga e para
+      if (scrapingStatus.value && !scrapingStatus.value.em_andamento) {
+        await fetchDeputado(id)
+        pararPolling()
+        return
+      }
+      
+      // Recarrega dados do deputado
+      await fetchDeputado(id)
+      
+      // Se já tem dados, para o polling
+      if (currentDespesas.value.length > 0 || currentCategorias.value.length > 0) {
+        pararPolling()
+      }
+    }, 15000) // 15 segundos
+  }
+
+  const pararPolling = () => {
+    if (pollingTimer) {
+      clearInterval(pollingTimer)
+      pollingTimer = null
+    }
+  }
 
   // Votos state
   const currentVotos = ref<VotosProjetoLegislativo | null>(null)
@@ -533,5 +611,10 @@ export const useCamaraStore = defineStore("camara", () => {
     setLegislatura,
     legislaturasDisponiveis,
     fetchLegislaturasDisponiveis,
+    fetchMaiorLegislatura,
+    scrapingStatus,
+    fetchScrapingStatus,
+    iniciarPollingDeputado,
+    pararPolling,
   }
 })

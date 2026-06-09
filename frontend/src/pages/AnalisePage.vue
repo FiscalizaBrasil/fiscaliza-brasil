@@ -112,6 +112,7 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import { useCamaraStore } from "@/stores/camara"
+import { formatCurrency } from '@/utils/format'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -139,9 +140,7 @@ const mesesGastos = computed(() => {
   return store.generalStats.gastos_por_mes.map(m => {
     const data = new Date(m.ano, m.mes - 1)
     const mesNome = data.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
-    const valorFormatado = m.valor >= 1000000 
-      ? `R$ ${(m.valor / 1000000).toFixed(1)}M`
-      : `R$ ${(m.valor / 1000).toFixed(0)}K`
+    const valorFormatado = formatCurrency(m.valor)
       
     return {
       mes: `${m.mes}/${m.ano}`,

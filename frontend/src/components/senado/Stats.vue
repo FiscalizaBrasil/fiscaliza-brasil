@@ -140,6 +140,7 @@ import { Users, MapPin, Flag, Map } from 'lucide-vue-next'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { useSenadoStore } from '@/stores/senado'
+import { formatCurrency } from '@/utils/format'
 
 const store = useSenadoStore()
 
@@ -169,7 +170,7 @@ const gastosUltimosMeses = computed(() => {
 
   return ultimos.map((m, i) => ({
     label: `${mesesPtBr[m.mes] || m.mes} ${m.ano}`,
-    valorFormatado: `R$ ${(m.valor / 1000000).toFixed(1)}M`,
+    valorFormatado: formatCurrency(m.valor),
     color: chartColors[i % chartColors.length],
     percentage: (m.valor / maxValor) * 100,
   }))

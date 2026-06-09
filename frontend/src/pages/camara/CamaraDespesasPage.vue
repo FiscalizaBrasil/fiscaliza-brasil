@@ -122,7 +122,7 @@
             <BaseCard v-for="categoria in categoriasDespesas" :key="categoria.nome">
               <div class="flex items-center justify-between mb-2">
                 <span class="text-sm font-medium text-foreground">{{ categoria.nome }}</span>
-                <span class="text-sm text-muted-foreground">R$ {{ (categoria.total / 1000000).toFixed(1) }}M</span>
+                <span class="text-sm text-muted-foreground">{{ formatCurrency(categoria.total) }}</span>
               </div>
               <div class="progress-bar">
                 <div
@@ -217,6 +217,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import HeroLegislaturaSelect from '@/components/ui/HeroLegislaturaSelect.vue'
 import { useCamaraStore } from "@/stores/camara"
 import { useLoadingStore } from "@/stores/loading"
+import { formatCurrency } from '@/utils/format'
 
 const store = useCamaraStore()
 const loadingStore = useLoadingStore()
@@ -243,9 +244,7 @@ const todosPartidos = computed(() => {
   return store.generalStats.gastos_por_partido.map(p => ({
     partido: p.partido,
     valor: p.valor,
-    valorFormatado: p.valor >= 1000000 
-      ? `R$ ${(p.valor / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`
-      : `R$ ${(p.valor / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`,
+    valorFormatado: formatCurrency(p.valor),
     percentual: ((p.valor / totalGeral) * 100).toFixed(1)
   }))
 })
@@ -292,7 +291,7 @@ const getStrokeColorClass = (index: number) => {
 const totalGastosFormatado = computed(() => {
   if (!store.generalStats?.gastos_por_partido) return 'R$ 0'
   const total = store.generalStats.gastos_por_partido.reduce((sum, p) => sum + p.valor, 0)
-  return `R$ ${(total / 1000000).toFixed(0)}M`
+  return formatCurrency(total)
 })
 
 const categoriasDespesas = computed(() => {
@@ -324,9 +323,7 @@ const deputadosFiltrados = computed(() => {
   return deputadosComGasto.value
     .map(d => ({
       ...d,
-      valorFormatado: d.totalGasto >= 1000000
-        ? `R$ ${(d.totalGasto / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`
-        : `R$ ${(d.totalGasto / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`,
+      valorFormatado: formatCurrency(d.totalGasto),
       percentualMax: (d.totalGasto / maxGasto) * 100
     }))
 })
@@ -344,7 +341,7 @@ const overviewStats = computed(() => [
   { 
     label: "Total de Gastos", 
     value: store.generalStats 
-      ? `R$ ${(store.generalStats.total_gastos / 1000000).toFixed(0)}M` 
+      ? formatCurrency(store.generalStats.total_gastos)
       : "...", 
     subvalue: "Acumulado Total",
     icon: Banknote, 
@@ -354,7 +351,7 @@ const overviewStats = computed(() => [
   { 
     label: "Média por Deputado", 
     value: store.generalStats && store.deputadoStats && store.deputadoStats.total_deputados > 0
-      ? `R$ ${(store.generalStats.total_gastos / store.deputadoStats.total_deputados / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`
+      ? formatCurrency(store.generalStats.total_gastos / store.deputadoStats.total_deputados)
       : "...", 
     icon: Users, 
     color: "text-accent", 

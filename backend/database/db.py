@@ -27,6 +27,14 @@ def get_db_connection():
     return db_pool.getconn()
 
 def release_db_connection(conn):
+    """
+    Devolve a conexão ao pool, garantindo que não fique em estado de transação abortada.
+    """
+    try:
+        # Rollback para limpar qualquer transação pendente/abortada
+        conn.rollback()
+    except Exception:
+        pass  # Se a conexão já estiver fechada, ignora
     db_pool.putconn(conn)
     
       

@@ -221,6 +221,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import HeroLegislaturaSelect from '@/components/ui/HeroLegislaturaSelect.vue'
 import { useSenadoStore } from '@/stores/senado'
 import { useLoadingStore } from '@/stores/loading'
+import { formatCurrency } from '@/utils/format'
 
 const store = useSenadoStore()
 const loadingStore = useLoadingStore()
@@ -237,16 +238,13 @@ const gastosPorPartido = computed(() => {
   return store.generalStats.partidos.map(p => ({
     partido: p.partido,
     valor: p.total,
-    valorFormatado: p.total >= 1000000
-      ? `R$ ${(p.total / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`
-      : `R$ ${(p.total / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`,
+    valorFormatado: formatCurrency(p.total),
     percentual: ((p.total / totalGeral) * 100).toFixed(1)
   }))
 })
 
 const totalGastosFormatado = computed(() => {
-  const total = store.generalStats?.total_gastos || 0
-  return total >= 1000000 ? `R$ ${(total / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}M` : `R$ ${(total / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`
+  return formatCurrency(store.generalStats?.total_gastos)
 })
 
 const allPieSegments = computed(() => {
@@ -273,9 +271,7 @@ const categoriasAgregadas = computed(() => {
   return store.generalStats.categorias.map(c => ({
     nome: c.categoria || 'Não informado',
     total: c.total,
-    valorFormatado: c.total >= 1000000
-      ? `R$ ${(c.total / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`
-      : `R$ ${(c.total / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`,
+    valorFormatado: formatCurrency(c.total),
     percentual: (c.total / totalCats) * 100
   }))
 })
@@ -289,9 +285,7 @@ const senadorsFiltrados = computed(() => {
       ...s,
       id: s.codigo,
       estado: s.uf,
-      valorFormatado: s.total >= 1000000
-        ? `R$ ${(s.total / 1000000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`
-        : `R$ ${(s.total / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`,
+      valorFormatado: formatCurrency(s.total),
       percentualMax: (s.total / maxGasto) * 100
     }))
 })
@@ -301,7 +295,7 @@ const overviewStats = computed(() => [
   {
     label: 'Total de Gastos',
     value: store.generalStats
-      ? `R$ ${(store.generalStats.total_gastos / 1000000).toFixed(0)}M`
+      ? formatCurrency(store.generalStats.total_gastos)
       : '...',
     subvalue: 'Acumulado Total',
     icon: Banknote,
@@ -311,7 +305,7 @@ const overviewStats = computed(() => [
   {
     label: 'Média por Senador',
     value: store.generalStats
-      ? `R$ ${(store.generalStats.media_por_senador / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`
+      ? formatCurrency(store.generalStats.media_por_senador)
       : '...',
     icon: Users,
     color: 'text-accent',

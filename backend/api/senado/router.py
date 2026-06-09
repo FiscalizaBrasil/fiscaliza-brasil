@@ -2,15 +2,143 @@ from fastapi import APIRouter, HTTPException, Query
 from datetime import date
 import psycopg2
 import logging
+import threading
 from functools import lru_cache
 
 # Garanta que este import está correto para sua estrutura
 import database.db as db
+from database.utils import get_maior_legislatura_senado, periodo_legislatura, get_foto_url_senado
+from scripts.import_data import import_all_data, import_despesas_senado
+from scripts.scraper import fetch_despesas_senado_ano, fetch_despesas_senado_todas, start_background_scraper, fetch_emendas_parlamentar
 
 router = APIRouter(
     prefix="/senado",
     tags=["Senado"]
 )
+
+
+# ============================================================
+# Função auxiliar para baixar despesas do Senado sob demanda
+# ============================================================
+
+def _ensure_despesas_senado():
+    """
+    Verifica se existem despesas CEAPS no banco.
+    Se não houver, dispara o download prioritário em background.
+    """
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        if not conn:
+            return
+        
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM senado.despesa_ceaps")
+            count = cursor.fetchone()[0]
+            
+            if count == 0:
+                logging.info("Sem despesas CEAPS no banco. Disparando download prioritário...")
+                threading.Thread(
+                    target=_download_and_import_despesas_senado,
+                    daemon=True
+                ).start()
+    except Exception as e:
+        logging.error(f"Erro ao verificar despesas do senado: {e}")
+    finally:
+        if conn:
+            db.release_db_connection(conn)
+
+
+def _download_and_import_despesas_senado():
+    """
+    Baixa as despesas CEAPS de todos os anos e importa para o banco.
+    Executado em thread separada.
+    """
+    try:
+        logging.info("Download prioritário: despesas CEAPS do Senado")
+        anos = list(range(2023, 2027))
+        for ano in anos:
+            fetch_despesas_senado_ano(ano)
+        
+        # Importa para o banco
+        conn = db.get_db_connection()
+        if conn:
+            try:
+                import_despesas_senado(conn)
+            finally:
+                db.release_db_connection(conn)
+        
+        logging.info("Download e importação de despesas CEAPS concluídos")
+    except Exception as e:
+        logging.error(f"Erro no download prioritário do senado: {e}")
+
+def _ensure_emendas_senador(senador_codigo: int, nome_senador: str):
+    """
+    Verifica se existem emendas no banco para o senador.
+    Se não houver, dispara o download prioritário em background.
+    """
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        if not conn:
+            return
+        
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*) FROM portal.emendas e
+                JOIN senado.parlamentar s 
+                  ON (lower(e.nome_autor) = lower(s.nome_completo) 
+                      OR lower(e.nome_autor) = lower(s.nome_parlamentar))
+                WHERE s.codigo = %s
+            """, (senador_codigo,))
+            count = cursor.fetchone()[0]
+            
+            if count == 0:
+                logging.info(f"Sem emendas no banco para senador {senador_codigo} ({nome_senador}). Disparando download prioritário...")
+                threading.Thread(
+                    target=_download_and_import_emendas_senador,
+                    args=(senador_codigo, nome_senador),
+                    daemon=True
+                ).start()
+    except Exception as e:
+        logging.error(f"Erro ao verificar emendas do senador {senador_codigo}: {e}")
+    finally:
+        if conn:
+            db.release_db_connection(conn)
+
+
+def _download_and_import_emendas_senador(senador_codigo: int, nome_senador: str):
+    """
+    Baixa as emendas de um senador e importa para o banco.
+    Executado em thread separada.
+    """
+    try:
+        logging.info(f"Download prioritário: emendas do senador {senador_codigo} ({nome_senador})")
+        
+        # Busca todas as páginas de emendas para este senador
+        pagina = 1
+        while True:
+            result = fetch_emendas_parlamentar(nome_senador.upper(), pagina=pagina)
+            emendas = result.get("emendas", [])
+            if not emendas:
+                break
+            pagina += 1
+            if pagina > 50:
+                break
+        
+        # Importa para o banco
+        from scripts.import_data import import_emendas
+        if import_emendas is not None:
+            conn = db.get_db_connection()
+            if conn:
+                try:
+                    import_emendas(conn)
+                    logging.info(f"Download e importação de emendas concluídos para senador {senador_codigo}")
+                finally:
+                    db.release_db_connection(conn)
+    except Exception as e:
+        logging.error(f"Erro no download prioritário de emendas do senador {senador_codigo}: {e}")
+
 
 def _periodo_legislatura(legislatura: int):
     inicio = 2023 - (57 - legislatura) * 4
@@ -26,6 +154,7 @@ def get_legislaturas_senado():
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
+            # Tenta primeiro da tabela senado.mandato
             query = """
                 SELECT DISTINCT primeira_legislatura, segunda_legislatura 
                 FROM senado.mandato
@@ -34,15 +163,62 @@ def get_legislaturas_senado():
             mandatos = cursor.fetchall()
             legis_set = set()
             for m in mandatos:
-                if m[0] and str(m[0]).strip().isdigit() and int(str(m[0]).strip()) <= 57:
+                if m[0] and str(m[0]).strip().isdigit():
                     legis_set.add(int(str(m[0]).strip()))
-                if m[1] and str(m[1]).strip().isdigit() and int(str(m[1]).strip()) <= 57:
+                if m[1] and str(m[1]).strip().isdigit():
                     legis_set.add(int(str(m[1]).strip()))
+            
+            # Se não encontrou em mandato, busca da tabela senado.legislatura
+            if not legis_set:
+                cursor.execute("""
+                    SELECT numero FROM senado.legislatura
+                    WHERE numero IS NOT NULL AND TRIM(numero) != ''
+                      AND TRIM(numero) ~ '^\\d+$'
+                    ORDER BY numero DESC
+                """)
+                for row in cursor.fetchall():
+                    legis_set.add(int(str(row[0]).strip()))
+            
+            # Se ainda não encontrou, calcula a partir dos anos das despesas
+            if not legis_set:
+                cursor.execute("""
+                    SELECT MIN(ano), MAX(ano) FROM senado.despesa_ceaps
+                """)
+                row = cursor.fetchone()
+                if row and row[0] and row[1]:
+                    min_ano, max_ano = row[0], row[1]
+                    # Cada legislatura dura 4 anos. A legislatura 57 começou em 2023.
+                    # Calcula quais legislaturas cobrem o intervalo de anos
+                    for ano in range(min_ano, max_ano + 1):
+                        leg = 57 - (2023 - ano) // 4
+                        legis_set.add(leg)
             
             return sorted(list(legis_set), reverse=True)
     except Exception as e:
         logging.error(f"Erro ao buscar legislaturas ativas senado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar legislaturas")
+    finally:
+        if conn:
+            db.release_db_connection(conn)
+
+
+@router.get("/maior-legislatura", summary="Retorna a maior legislatura disponível na base")
+@lru_cache(maxsize=1)
+def get_maior_legislatura_senado_endpoint():
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
+        
+        maior_leg = get_maior_legislatura_senado(conn)
+        if maior_leg is None:
+            return {"maior_legislatura": None, "db_vazio": True}
+        
+        return {"maior_legislatura": maior_leg, "db_vazio": False}
+    except Exception as e:
+        logging.error(f"Erro ao buscar maior legislatura: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao processar maior legislatura")
     finally:
         if conn:
             db.release_db_connection(conn)
@@ -56,29 +232,48 @@ def get_lista_senadores(legislatura: int):
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
-            query = """
-                SELECT
-                    p.codigo,
-                    p.nome_parlamentar,
-                    p.sigla_partido,
-                    COALESCE(
-                        NULLIF(TRIM(p.uf::text), ''),
-                        NULLIF(TRIM(MAX(m.uf)::text), '')
-                    ) AS uf,
-                    p.url_foto
-                FROM senado.parlamentar p
-                INNER JOIN senado.mandato m ON p.codigo = m.codigo_parlamentar
-            """
-            params: list[object] = []
-            if legislatura:
-                query += " WHERE m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text"
-                params.extend([str(legislatura), str(legislatura)])
-                
-            query += """
-                GROUP BY p.codigo, p.nome_parlamentar, p.sigla_partido, p.uf, p.url_foto
-                ORDER BY p.codigo, p.nome_parlamentar ASC
-            """
-            cursor.execute(query, tuple(params))
+            # Verifica se a tabela mandato tem registros
+            cursor.execute("SELECT COUNT(*) FROM senado.mandato")
+            tem_mandato = cursor.fetchone()[0] > 0
+
+            if tem_mandato:
+                # Usa JOIN com mandato para filtrar por legislatura
+                query = """
+                    SELECT
+                        p.codigo,
+                        p.nome_parlamentar,
+                        p.sigla_partido,
+                        COALESCE(
+                            NULLIF(TRIM(p.uf::text), ''),
+                            NULLIF(TRIM(MAX(m.uf)::text), '')
+                        ) AS uf,
+                        p.url_foto
+                    FROM senado.parlamentar p
+                    INNER JOIN senado.mandato m ON p.codigo = m.codigo_parlamentar
+                """
+                params: list[object] = []
+                if legislatura:
+                    query += " WHERE m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text"
+                    params.extend([str(legislatura), str(legislatura)])
+                    
+                query += """
+                    GROUP BY p.codigo, p.nome_parlamentar, p.sigla_partido, p.uf, p.url_foto
+                    ORDER BY p.codigo, p.nome_parlamentar ASC
+                """
+                cursor.execute(query, tuple(params))
+            else:
+                # Fallback: lista todos os senadores da tabela parlamentar (sem mandato)
+                query = """
+                    SELECT
+                        codigo,
+                        nome_parlamentar,
+                        sigla_partido,
+                        NULLIF(TRIM(uf::text), '') AS uf,
+                        url_foto
+                    FROM senado.parlamentar
+                    ORDER BY nome_parlamentar ASC
+                """
+                cursor.execute(query)
             
             resultados = cursor.fetchall()
             
@@ -89,7 +284,7 @@ def get_lista_senadores(legislatura: int):
                     "nomeParlamentar": r[1],
                     "siglaPartido": r[2],
                     "uf": r[3],
-                    "urlFoto": r[4]
+                    "urlFoto": get_foto_url_senado(r[0], r[4])
                 }
                 for r in resultados
             ]
@@ -100,6 +295,7 @@ def get_lista_senadores(legislatura: int):
     finally:
         if conn:
             db.release_db_connection(conn)
+
 
 
 
@@ -299,7 +495,7 @@ LIMIT 12;
                     "siglaPartido": senador_1_data[4],
                     "uf": senador_1_data[5],
                     "email": senador_1_data[6],
-                    "urlFoto": senador_1_data[7],
+                    "urlFoto": get_foto_url_senado(senador_1_data[0], senador_1_data[7]),
                     "dataNascimento": senador_1_data[8]
                 },
                 "senador2": {
@@ -310,7 +506,7 @@ LIMIT 12;
                     "siglaPartido": senador_2_data[4],
                     "uf": senador_2_data[5],
                     "email": senador_2_data[6],
-                    "urlFoto": senador_2_data[7],
+                    "urlFoto": get_foto_url_senado(senador_2_data[0], senador_2_data[7]),
                     "dataNascimento": senador_2_data[8]
                 },
                 "despesas": [           
@@ -453,9 +649,9 @@ WHERE codigo = %s;"""
             mandatos = cursor.fetchall()
             legis_set = set()
             for m in mandatos:
-                if m[0] and str(m[0]).strip().isdigit() and int(str(m[0]).strip()) <= 57:
+                if m[0] and str(m[0]).strip().isdigit():
                     legis_set.add(int(str(m[0]).strip()))
-                if m[1] and str(m[1]).strip().isdigit() and int(str(m[1]).strip()) <= 57:
+                if m[1] and str(m[1]).strip().isdigit():
                     legis_set.add(int(str(m[1]).strip()))
             legislaturas_ativas = sorted(list(legis_set), reverse=True)
 
@@ -467,7 +663,15 @@ WHERE codigo = %s;"""
             elif legislaturas_ativas:
                 leg_exibida = legislaturas_ativas[0]
             else:
-                leg_exibida = 57
+                # Fallback: busca a maior legislatura disponível no banco
+                maior_leg = get_maior_legislatura_senado(conn)
+                leg_exibida = maior_leg if maior_leg else 57
+
+            # Dispara download de emendas em background se não houver dados
+            if total_emendas == 0:
+                nome_senador = resultado[1] or resultado[2]  # nome_parlamentar ou nome_completo
+                if nome_senador:
+                    _ensure_emendas_senador(senador_codigo, nome_senador)
 
             return {
                 "senador": {
@@ -478,7 +682,7 @@ WHERE codigo = %s;"""
                     "siglaPartido": resultado[4],
                     "uf": uf_referencia,
                     "email": resultado[6],
-                    "urlFoto": resultado[7],
+                    "urlFoto": get_foto_url_senado(resultado[0], resultado[7]),
                     "urlPagina": resultado[8],
                     "dataNascimento": resultado[9],
                     "total_emendas": total_emendas,
@@ -486,6 +690,7 @@ WHERE codigo = %s;"""
                     "legislatura_exibida": leg_exibida
                 }
             }
+
     except Exception as e:
         logging.error(f"Erro ao buscar senador: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar senador")
@@ -505,6 +710,12 @@ def get_despesas_senador(legislatura: int, senador_codigo: int, pagina: int = 1)
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
+            # Verifica se existem despesas no banco; se não, dispara download prioritário
+            cursor.execute("SELECT COUNT(*) FROM senado.despesa_ceaps")
+            count_despesas = cursor.fetchone()[0]
+            if count_despesas == 0:
+                _ensure_despesas_senado()
+
             # 1. Buscar o total de despesas para paginação
             query_count = """SELECT COUNT(*) 
                 FROM senado.despesa_ceaps d
@@ -752,7 +963,7 @@ def get_despesas_estatisticas(legislatura: int):
                         "nome": r[1],
                         "partido": r[2],
                         "uf": r[3],
-                        "foto": r[4],
+                        "foto": get_foto_url_senado(r[0], r[4]),
                         "total": float(r[5])
                     }
                     for r in top_10
@@ -1156,7 +1367,7 @@ def get_resumo_emendas(legislatura: int):
                         "partido": r[2] if r[2] else "S/P",
                         "estado": r[3] if r[3] else "BR",
                         "emendasTotal": float(r[5]),
-                        "foto": r[4] if r[4] and str(r[4]).strip() else "/placeholder-user.svg"
+                        "foto": get_foto_url_senado(r[0], r[4]) if r[4] and str(r[4]).strip() else "/placeholder-user.svg"
                     }
                     for r in top_senadores
                 ]
@@ -1216,7 +1427,7 @@ def get_votacao_materia(legislatura: int, codigo_materia: int):
                         "voto": r[5],
                         "resultado": r[6],
                         "codigo": r[7],
-                        "foto": r[8]
+                        "foto": get_foto_url_senado(r[7], r[8])
                     }
                     for r in resultados
                 ]
@@ -1337,8 +1548,11 @@ def get_emendas_lista_senador(legislatura: int, senador_codigo: int, pagina: int
 
 
 @router.get("/{legislatura}/empresas/estatisticas", summary="Obtém estatísticas gerais das empresas")
-@lru_cache(maxsize=4)
 def get_estatisticas_empresas(legislatura: int):
+    """
+    Retorna estatísticas de empresas fornecedoras dos senadores.
+    Calcula os dados em tempo real a partir da tabela de despesas CEAPS.
+    """
     conn = None
     try:
         conn = db.get_db_connection()
@@ -1346,12 +1560,34 @@ def get_estatisticas_empresas(legislatura: int):
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
-            # 1. Estatísticas Gerais from summary table
-            query_gerais = "SELECT total_empresas, total_pago, total_contratos FROM senado.summary_empresas_geral WHERE legislatura = %s"
-            cursor.execute(query_gerais, (legislatura,))
+            # Determinar o período da legislatura
+            if legislatura and legislatura > 0:
+                start_year = 2023 - (57 - legislatura) * 4
+                end_year = start_year + 3
+                filtro_ano = "AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
+                params_ano = [start_year, end_year]
+            else:
+                filtro_ano = ""
+                params_ano = []
+            
+            # 1. Estatísticas Gerais - calculadas em tempo real
+            query_gerais = f"""
+                SELECT 
+                    COUNT(DISTINCT d.cpf_cnpj) as total_empresas,
+                    COALESCE(SUM(d.valor_reembolsado), 0) as total_pago,
+                    COUNT(*) as total_contratos
+                FROM senado.despesa_ceaps d
+                WHERE d.cpf_cnpj IS NOT NULL AND TRIM(d.cpf_cnpj) != ''
+                  {filtro_ano}
+            """
+            cursor.execute(query_gerais, tuple(params_ano))
             res_stats = cursor.fetchone()
             
-            if not res_stats:
+            total_empresas = res_stats[0] if res_stats else 0
+            total_pago = float(res_stats[1]) if res_stats else 0.0
+            total_contratos = res_stats[2] if res_stats else 0
+            
+            if total_empresas == 0:
                 return {
                     "total_empresas": 0,
                     "total_pago": 0.0,
@@ -1360,34 +1596,44 @@ def get_estatisticas_empresas(legislatura: int):
                     "top_20_empresas": []
                 }
 
-            # 2. Ranking from summary table
-            query_ranking = """
-                SELECT rank, empresa, partidos, cnpj, valor_total, contratos, percentual
-                FROM senado.summary_empresas_ranking
-                WHERE legislatura = %s
-                ORDER BY rank ASC
+            # 2. Ranking - agrupado por CPF/CNPJ apenas (consolidando variações de nome)
+            query_ranking = f"""
+                SELECT 
+                    d.cpf_cnpj,
+                    MAX(d.fornecedor) as fornecedor,
+                    COALESCE(SUM(d.valor_reembolsado), 0) as valor_total,
+                    COUNT(*) as qtd_contratos,
+                    STRING_AGG(DISTINCT p.sigla_partido, ', ' ORDER BY p.sigla_partido) as partidos
+                FROM senado.despesa_ceaps d
+                LEFT JOIN senado.parlamentar p ON d.cod_senador = p.codigo
+                WHERE d.cpf_cnpj IS NOT NULL AND TRIM(d.cpf_cnpj) != ''
+                  {filtro_ano}
+                GROUP BY d.cpf_cnpj
+                ORDER BY valor_total DESC
                 LIMIT 20
             """
-            cursor.execute(query_ranking, (legislatura,))
+            cursor.execute(query_ranking, tuple(params_ano))
             res_ranking = cursor.fetchall()
+            
+            total_pago_real = total_pago if total_pago > 0 else 1.0
             
             top_20 = [
                 {
-                    "rank": r[0],
-                    "empresa": r[1],
-                    "partidos": r[2],
-                    "cnpj": r[3],
-                    "valor_total": float(r[4]),
-                    "contratos": r[5],
-                    "percentual": float(r[6])
+                    "rank": idx + 1,
+                    "empresa": r[1] or f"CNPJ/CPF {r[0]}",
+                    "partidos": r[4] or "N/A",
+                    "cnpj": r[0],
+                    "valor_total": float(r[2]),
+                    "contratos": int(r[3]),
+                    "percentual": round((float(r[2]) / total_pago_real) * 100, 2)
                 }
-                for r in res_ranking
+                for idx, r in enumerate(res_ranking)
             ]
 
             return {
-                "total_empresas": res_stats[0],
-                "total_pago": float(res_stats[1]),
-                "total_contratos": res_stats[2],
+                "total_empresas": total_empresas,
+                "total_pago": total_pago,
+                "total_contratos": total_contratos,
                 "top_10_empresas": [
                     {"empresa": r["empresa"], "valor_total": r["valor_total"]}
                     for r in top_20[:10]
@@ -1395,18 +1641,18 @@ def get_estatisticas_empresas(legislatura: int):
                 "top_20_empresas": top_20
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar estatísticas de empresas (summary): {e}")
-        raise HTTPException(status_code=500, detail="Erro ao processar estatísticas")
+        logging.error(f"Erro ao buscar estatísticas de empresas: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao processar estatísticas de empresas")
     finally:
         if conn:
             db.release_db_connection(conn)
 
 @router.get("/resumo-principal", summary="Resumo otimizado para a página principal (Senado)")
-@lru_cache(maxsize=8)
 def get_resumo_principal_senado(legislatura: int = 0):
     """
     Retorna apenas o total de senadores e o total de gastos dos últimos 12 meses.
     Ideal para dashboards e página inicial.
+    Se legislatura não for informada, usa a maior legislatura disponível no banco.
     """
     conn = None
     try:
@@ -1415,32 +1661,66 @@ def get_resumo_principal_senado(legislatura: int = 0):
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
+            # Se legislatura não foi informada (0), busca dados de todos os senadores
+            # sem filtrar por período de legislatura
+            usar_legislatura = legislatura if (legislatura and legislatura > 0) else None
+            
+            if not usar_legislatura:
+                # Verifica se há dados no banco
+                cursor.execute("SELECT COUNT(*) FROM senado.mandato")
+                total_mandatos = cursor.fetchone()[0]
+                
+                if total_mandatos == 0:
+                    # Tenta importar dados dos JSONs baixados pelo scraper
+                    logging.info("Banco vazio detectado. Tentando importar dados dos arquivos JSON...")
+                    try:
+                        import_all_data(conn)
+                        logging.info("Importação concluída. Refazendo consulta...")
+                    except Exception as import_err:
+                        logging.error(f"Erro ao importar dados: {import_err}")
+                    
+                    cursor.execute("SELECT COUNT(*) FROM senado.mandato")
+                    total_mandatos = cursor.fetchone()[0]
+                    if total_mandatos == 0:
+                        return {
+                            "total_parlamentares": 0,
+                            "gastos_12_meses": 0.0,
+                            "db_vazio": True
+                        }
+            
             # 1. Total de senadores
             query_total = "SELECT COUNT(DISTINCT codigo_parlamentar) FROM senado.mandato"
             params_total: list[object] = []
-            if legislatura and legislatura > 0:
+            if usar_legislatura:
                 query_total += " WHERE primeira_legislatura::text = %s::text OR segunda_legislatura::text = %s::text"
-                params_total.extend([str(legislatura), str(legislatura)])
+                params_total.extend([str(usar_legislatura), str(usar_legislatura)])
             
             cursor.execute(query_total, tuple(params_total))
             total_senadores = cursor.fetchone()[0] or 0
 
             # 2. Gastos dos últimos 12 meses
+            # Usa COALESCE para considerar data_despesa OU ano/mes quando data_despesa for NULL
             query_gastos = """
                 SELECT COALESCE(SUM(d.valor_reembolsado), 0)
                 FROM senado.despesa_ceaps d
-                WHERE d.data_despesa >= (CURRENT_DATE - INTERVAL '12 months')
+                WHERE COALESCE(
+                    d.data_despesa,
+                    TO_DATE(CAST(d.ano AS TEXT) || '-' || LPAD(CAST(d.mes AS TEXT), 2, '0') || '-01', 'YYYY-MM-DD')
+                ) >= (CURRENT_DATE - INTERVAL '12 months')
             """
             params_gastos: list[object] = []
-            if legislatura and legislatura > 0:
+            if usar_legislatura:
                 # Para filtrar por legislatura, é necessário garantir que o senador
                 # estava em exercício no período da despesa (baseado no ano)
-                start_year = 2023 - (57 - legislatura) * 4
+                start_year = 2023 - (57 - usar_legislatura) * 4
                 end_year = start_year + 3
                 query_gastos = """
                     SELECT COALESCE(SUM(d.valor_reembolsado), 0)
                     FROM senado.despesa_ceaps d
-                    WHERE d.data_despesa >= (CURRENT_DATE - INTERVAL '12 months')
+                    WHERE COALESCE(
+                        d.data_despesa,
+                        TO_DATE(CAST(d.ano AS TEXT) || '-' || LPAD(CAST(d.mes AS TEXT), 2, '0') || '-01', 'YYYY-MM-DD')
+                    ) >= (CURRENT_DATE - INTERVAL '12 months')
                       AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s
                       AND EXISTS (
                           SELECT 1 FROM senado.mandato m
@@ -1448,14 +1728,35 @@ def get_resumo_principal_senado(legislatura: int = 0):
                             AND (m.primeira_legislatura::text = %s::text OR m.segunda_legislatura::text = %s::text)
                       )
                 """
-                params_gastos.extend([start_year, end_year, str(legislatura), str(legislatura)])
+                params_gastos.extend([start_year, end_year, str(usar_legislatura), str(usar_legislatura)])
+            else:
+                # Sem filtro de legislatura: busca gastos de todos os senadores
+                query_gastos = """
+                    SELECT COALESCE(SUM(d.valor_reembolsado), 0)
+                    FROM senado.despesa_ceaps d
+                    WHERE COALESCE(
+                        d.data_despesa,
+                        TO_DATE(CAST(d.ano AS TEXT) || '-' || LPAD(CAST(d.mes AS TEXT), 2, '0') || '-01', 'YYYY-MM-DD')
+                    ) >= (CURRENT_DATE - INTERVAL '12 months')
+                """
             
             cursor.execute(query_gastos, tuple(params_gastos))
             gastos_12_meses = float(cursor.fetchone()[0] or 0)
 
+            db_vazio = total_senadores == 0
+
+            # Se tem senadores mas não tem gastos, dispara download prioritário em background
+            if not db_vazio and gastos_12_meses == 0:
+                logging.info("Resumo: senadores encontrados mas sem despesas. Disparando download prioritário...")
+                threading.Thread(
+                    target=fetch_despesas_senado_todas,
+                    daemon=True
+                ).start()
+
             return {
                 "total_parlamentares": total_senadores,
-                "gastos_12_meses": gastos_12_meses
+                "gastos_12_meses": gastos_12_meses,
+                "db_vazio": db_vazio
             }
     except Exception as e:
         logging.error(f"Erro no resumo principal do Senado: {e}")

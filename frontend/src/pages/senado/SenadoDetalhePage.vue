@@ -40,6 +40,16 @@
       </div>
 
       <template v-else-if="store.currentSenador">
+        <!-- Scraping Banner -->
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-6">
+          <ScrapingBanner
+            tipo="senado"
+            :em-andamento="store.scrapingStatus?.em_andamento ?? false"
+            :camara-pendentes="store.scrapingStatus?.camara_pendentes ?? null"
+            :senado-pendentes="store.scrapingStatus?.senado_pendentes ?? null"
+          />
+        </div>
+
         <!-- Profile -->
         <section class="py-8 bg-background border-b border-border/50">
           <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -98,7 +108,7 @@
                   <div class="flex items-center justify-between">
                     <p class="text-sm text-muted-foreground">Gastos Totais Mandato</p>
                   </div>
-                  <p v-if="totalGastos > 0" class="mt-2 text-3xl font-bold text-foreground">R$ {{ (totalGastos / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }} mil</p>
+                  <p v-if="totalGastos > 0" class="mt-2 text-3xl font-bold text-foreground">{{ formatCurrency(totalGastos) }}</p>
                   <p v-else class="mt-2 text-xl font-bold text-muted-foreground">0</p>
                   <p class="mt-1 text-xs text-muted-foreground">Soma de todas despesas registradas</p>
                 </BaseCard>
@@ -108,7 +118,7 @@
                     <p class="text-sm text-muted-foreground">Emendas</p>
                     <BaseBadge variant="secondary" class="bg-primary-100 text-primary-800">Mandato</BaseBadge>
                   </div>
-                  <p v-if="store.totalEmendas > 0" class="mt-2 text-3xl font-bold text-foreground">R$ {{ (store.totalEmendas / 1000000).toFixed(1) }}M</p>
+                  <p v-if="store.totalEmendas > 0" class="mt-2 text-3xl font-bold text-foreground">{{ formatCurrency(store.totalEmendas) }}</p>
                   <p v-else class="mt-2 text-xl font-bold text-muted-foreground">Dados Indisponíveis</p>
                   <p class="mt-1 text-xs text-muted-foreground text-primary-600/70">Soma das emendas pagas ao senador</p>
                 </BaseCard>
@@ -122,7 +132,7 @@
                     <div v-for="item in gastosCategorias" :key="item.categoria">
                       <div class="flex items-center justify-between text-sm mb-1">
                         <span class="text-muted-foreground">{{ item.categoria }}</span>
-                        <span class="font-medium text-foreground">R$ {{ (item.valor / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }} mil</span>
+                        <span class="font-medium text-foreground">{{ formatCurrency(item.valor) }}</span>
                       </div>
                       <div class="progress-bar bg-primary-100">
                         <div
@@ -267,14 +277,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ChevronLeft, ChevronRight, Mail, Calendar, GraduationCap } from 'lucide-vue-next'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import ScrapingBanner from '@/components/ScrapingBanner.vue'
 import { useSenadoStore } from '@/stores/senado'
+import { formatCurrency } from "@/utils/format"
 
 const route = useRoute()
 const store = useSenadoStore()
@@ -283,6 +295,8 @@ const loadData = () => {
     const id = Number(route.params.id)
     if (id) {
         store.fetchSenador(id)
+        store.fetchScrapingStatus()
+        store.iniciarPollingSenador(id)
     }
 }
 
@@ -290,11 +304,17 @@ onMounted(() => {
     loadData()
 })
 
+onUnmounted(() => {
+    store.pararPolling()
+})
+
 watch(() => route.params.id, () => {
+    store.pararPolling()
     loadData()
 })
 
 watch(() => store.legislatura, () => {
+    store.pararPolling()
     loadData()
 })
 

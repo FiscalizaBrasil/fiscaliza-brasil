@@ -17,7 +17,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: sh -c "python scripts/esperar_postgres.py && python main.py"
+    command: sh -c "python scripts/init_db.py && python scripts/scraper.py && python main.py"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
   frontend:
     image: tcc-frontend
@@ -34,6 +40,9 @@ services:
       - tcc-network
     environment:
       - VITE_API_URL=http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
 
   postgres:
     image: postgres:18
@@ -47,13 +56,14 @@ services:
       - "5432:5432"
     volumes:
       - tcc-pgdata:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d
     networks:
       - tcc-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d fiscaliza_db"]
+      interval: 5s
       timeout: 5s
       retries: 15
+      start_period: 0s
 
 networks:
   tcc-network:
