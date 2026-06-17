@@ -1,0 +1,65 @@
+services:
+  backend:
+    image: tcc-backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/fiscaliza_db
+      - API_KEY=${API_KEY} # obtido  .env na pasta raiz do projeto
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    networks:
+      - tcc-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "python scripts/esperar_postgres.py && python main.py"
+
+  frontend:
+    image: tcc-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - tcc-network
+    environment:
+      - VITE_API_URL=http://localhost:8000
+
+  postgres:
+    image: postgres:18
+    container_name: database
+    environment:
+      POSTGRES_DB: fiscaliza_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - tcc-pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - tcc-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fiscaliza_db"]
+      timeout: 5s
+      retries: 15
+
+networks:
+  tcc-network:
+    name: tcc-network
+    driver: bridge
+
+volumes:
+  tcc-pgdata:
+    name: tcc-pgdata
