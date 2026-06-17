@@ -180,28 +180,3 @@ CREATE TABLE deputados (
 	municipio_nascimento TEXT
 );
 ```
-
-## Sugestões e melhorias
-
-- Adicionar `fastapi` e `uvicorn` ao `requirements.txt` para facilitar instalação.
-- Adicionar `README` específico dentro de `backend/` e `frontend/` com instruções separadas.
-- Criar um arquivo `backend/.env.example` com as variáveis necessárias.
-- Adicionar scripts automatizados (ex.: `run-backend.ps1`) que ativem o venv e iniciem o uvicorn.
-
-## Ajuda / Troubleshooting
-
-- **ModuleNotFoundError: No module named 'apscheduler'**:
-  - **No Docker**: Certifique-se de que o venv está ativo e rode `pip install -r ..\requirements.txt`.
-  - **No Docker**: Rode `docker compose build backend` seguido de `docker compose up -d` para garantir que a imagem foi construída com as novas dependências.
-- Erro de conexão ao banco: verifique `.env`, se o PostgreSQL está em execução e se o usuário/ senha/ host/ porta estão corretos.
-- Erro de import (psycopg2): execute `pip install psycopg2-binary` no venv.
-- Se houver mensagens de CORS no frontend, verifique `origins` em `backend/main.py` e ajuste conforme o `host:port` do frontend.
-
-Se quiser, eu posso:
-- adicionar `backend/.env.example` automaticamente,
-- inserir `fastapi` e `uvicorn` no `requirements.txt`,
-- criar um script `run-backend.ps1` para rodar tudo automaticamente.
-
----
-
-Obrigado — me diga se quer que eu gere os arquivos auxiliares (`.env.example`, `run-backend.ps1`) agora.
