@@ -1,6 +1,6 @@
 services:
   backend:
-    image: tcc-backend
+    image: fiscaliza-backend
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -13,12 +13,16 @@ services:
     volumes:
       - ./backend:/app
     networks:
-      - tcc-network
+      - fiscaliza-network
     depends_on:
       postgres:
         condition: service_healthy
-    command: sh -c "python scripts/init_db.py && python scripts/scraper.py && python main.py"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    command: sh -c "python scripts/init_db.py && python main.py"
     healthcheck:
+
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
@@ -26,7 +30,7 @@ services:
       start_period: 40s
 
   frontend:
-    image: tcc-frontend
+    image: fiscaliza-frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -37,12 +41,12 @@ services:
       - ./frontend:/app
       - /app/node_modules
     networks:
-      - tcc-network
+      - fiscaliza-network
     environment:
       - VITE_API_URL=http://localhost:8000
     depends_on:
       backend:
-        condition: service_healthy
+        condition: service_started
 
   postgres:
     image: postgres:18
@@ -55,9 +59,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - tcc-pgdata:/var/lib/postgresql/data
+      - fiscaliza-pgdata:/var/lib/postgresql/data
     networks:
-      - tcc-network
+      - fiscaliza-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d fiscaliza_db"]
       interval: 5s
@@ -66,10 +70,10 @@ services:
       start_period: 0s
 
 networks:
-  tcc-network:
-    name: tcc-network
+  fiscaliza-network:
+    name: fiscaliza-network
     driver: bridge
 
 volumes:
-  tcc-pgdata:
-    name: tcc-pgdata
+  fiscaliza-pgdata:
+    name: fiscaliza-pgdata

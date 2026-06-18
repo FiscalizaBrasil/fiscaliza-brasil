@@ -3,20 +3,36 @@ Funções utilitárias para consultas ao banco de dados.
 """
 
 import os
+import math
 import logging
+from datetime import date
 from functools import lru_cache
+
+
+def get_legislatura_atual() -> int:
+    """
+    Retorna a legislatura atual com base no ano corrente.
+    Fórmula: FLOOR((ano - 1987) / 4) + 48
+    
+    Cada legislatura dura 4 anos. A 48ª legislatura começou em 1987.
+    """
+    ano_atual = date.today().year
+    return math.floor((ano_atual - 1987) / 4) + 48
 
 
 def get_maior_legislatura_camara(conn):
     """
-    Retorna a maior legislatura disponível na tabela camara.deputados_mandatos.
+    Retorna a maior legislatura disponível na tabela camara.deputados_mandatos,
+    limitada à legislatura atual (não retorna legislaturas futuras).
     Retorna None se não houver nenhuma legislatura.
     """
     try:
         with conn.cursor() as cursor:
             cursor.execute("SELECT MAX(legislatura_id) FROM camara.deputados_mandatos")
             result = cursor.fetchone()
-            return result[0] if result and result[0] is not None else None
+            if result and result[0] is not None:
+                return min(result[0], get_legislatura_atual())
+            return None
     except Exception as e:
         logging.error(f"Erro ao buscar maior legislatura da Câmara: {e}")
         return None
@@ -24,7 +40,8 @@ def get_maior_legislatura_camara(conn):
 
 def get_maior_legislatura_senado(conn):
     """
-    Retorna a maior legislatura disponível no banco.
+    Retorna a maior legislatura disponível no banco,
+    limitada à legislatura atual (não retorna legislaturas futuras).
     Tenta primeiro da tabela senado.mandato.
     Se vazio, tenta da tabela senado.legislatura.
     Se ainda vazio, calcula a partir dos anos das despesas.
@@ -42,7 +59,7 @@ def get_maior_legislatura_senado(conn):
             """)
             result = cursor.fetchone()
             if result and result[0] is not None and result[0] > 0:
-                return result[0]
+                return min(result[0], get_legislatura_atual())
 
             # 2. Fallback: senado.legislatura
             cursor.execute("""
@@ -53,7 +70,7 @@ def get_maior_legislatura_senado(conn):
             """)
             result = cursor.fetchone()
             if result and result[0] is not None and result[0] > 0:
-                return result[0]
+                return min(result[0], get_legislatura_atual())
 
             # 3. Fallback: calcular a partir dos anos das despesas
             cursor.execute("""
@@ -64,7 +81,9 @@ def get_maior_legislatura_senado(conn):
                 min_ano, max_ano = int(row[0]), int(row[1])
                 # Calcula a maior legislatura que cobre o intervalo
                 maior_leg = 57 - (2023 - max_ano) // 4
-                return maior_leg if maior_leg > 0 else None
+                if maior_leg > 0:
+                    return min(maior_leg, get_legislatura_atual())
+                return None
 
             return None
     except Exception as e:

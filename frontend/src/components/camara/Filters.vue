@@ -55,6 +55,26 @@
         Limpar todos
       </button>
     </div>
+
+    <!-- Toggle Suplentes -->
+    <div class="flex items-center gap-2 pt-2 border-t border-border/50">
+      <button
+        @click="store.toggleIncluirSuplentes()"
+        class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        :class="{ 'text-primary font-medium': store.incluirSuplentes }"
+      >
+        <div
+          class="w-9 h-5 rounded-full transition-colors relative"
+          :class="store.incluirSuplentes ? 'bg-primary' : 'bg-muted-foreground/30'"
+        >
+          <div
+            class="w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-transform"
+            :class="store.incluirSuplentes ? 'translate-x-[18px]' : 'translate-x-[2px]'"
+          />
+        </div>
+        <span>Incluir suplentes</span>
+      </button>
+    </div>
   </div>
 </template>
 

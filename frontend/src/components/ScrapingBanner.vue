@@ -43,5 +43,13 @@ const props = defineProps<{
   senadoPendentes?: number | null
 }>()
 
-const showBanner = computed(() => props.emAndamento)
+const showBanner = computed(() => {
+  if (!props.emAndamento) return false
+  
+  // Se não há pendentes do tipo específico, não mostra o banner
+  if (props.tipo === 'camara' && (props.camaraPendentes === null || props.camaraPendentes === 0)) return false
+  if (props.tipo === 'senado' && (props.senadoPendentes === null || props.senadoPendentes === 0)) return false
+  
+  return true
+})
 </script>

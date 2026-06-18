@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
 Script de inicialização do banco de dados.
-Cria os schemas e tabelas necessários se não existirem.
+Cria os schemas e tabelas necessários se não existirem,
+e importa automaticamente todos os dados JSON já baixados em data/.
 """
 
 import sys
@@ -53,7 +54,7 @@ def ensure_schema(cursor):
         CREATE TABLE IF NOT EXISTS camara.deputados_mandatos (
             id VARCHAR(20) PRIMARY KEY,
             deputado_id INTEGER REFERENCES camara.deputados(id),
-            legislatura_id INTEGER REFERENCES camara.legislaturas(id),
+            legislatura_id INTEGER NOT NULL REFERENCES camara.legislaturas(id),
             nome_eleitoral TEXT NOT NULL,
             sigla_partido VARCHAR(20),
             sigla_uf CHAR(2),
@@ -174,6 +175,23 @@ def ensure_schema(cursor):
     """)
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS camara.proposicoes_autores (
+            id SERIAL PRIMARY KEY,
+            proposicao_id INTEGER NOT NULL REFERENCES camara.proposicoes(id) ON DELETE CASCADE,
+            deputado_id INTEGER REFERENCES camara.deputados(id) ON DELETE CASCADE,
+            tipo_autor VARCHAR(50),
+            ordem_assinatura INTEGER,
+            proponente BOOLEAN DEFAULT FALSE,
+            UNIQUE(proposicao_id, deputado_id)
+        );
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_proposicoes_autores_proposicao ON camara.proposicoes_autores(proposicao_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_proposicoes_autores_deputado ON camara.proposicoes_autores(deputado_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_proposicoes_ano ON camara.proposicoes(ano);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_proposicoes_sigla_tipo ON camara.proposicoes(sigla_tipo);")
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS camara.summary_empresas_geral (
             legislatura_id INTEGER PRIMARY KEY,
             total_empresas INTEGER,
@@ -200,6 +218,38 @@ def ensure_schema(cursor):
     """)
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_camara_ranking_leg ON camara.summary_empresas_ranking(legislatura_id);")
+
+    # --- Índices de performance para queries de perfil de deputado ---
+    # Índice para acelerar JOIN de despesas com mandatos (mandato_id é VARCHAR)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_deputados_despesas_mandato_id ON camara.deputados_despesas(mandato_id);")
+    # Índice composto para acelerar a query principal de despesas por deputado (mais usado)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_deputados_despesas_mandato_tipo ON camara.deputados_despesas(mandato_id, tipo_despesa);")
+    # Índice para acelerar busca de despesas por ano/mês
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_deputados_despesas_ano_mes ON camara.deputados_despesas(ano, mes);")
+    # Índice para acelerar busca de mandatos por deputado
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_deputados_mandatos_deputado_id ON camara.deputados_mandatos(deputado_id);")
+    # Índice composto para acelerar filtros por legislatura
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_deputados_mandatos_deputado_legislatura ON camara.deputados_mandatos(deputado_id, legislatura_id);")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS camara.deputados_historico (
+            id SERIAL PRIMARY KEY,
+            deputado_id INTEGER NOT NULL REFERENCES camara.deputados(id) ON DELETE CASCADE,
+            data_hora TIMESTAMP NOT NULL,
+            situacao TEXT,
+            condicao_eleitoral TEXT,
+            descricao_status TEXT,
+            sigla_partido VARCHAR(20),
+            sigla_uf CHAR(2),
+            nome_eleitoral TEXT,
+            url_foto TEXT,
+            id_legislatura INTEGER,
+            UNIQUE(deputado_id, data_hora)
+        );
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_deputados_historico_deputado ON camara.deputados_historico(deputado_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_deputados_historico_legislatura ON camara.deputados_historico(id_legislatura);")
 
     # --- Schema senado ---
     cursor.execute("CREATE SCHEMA IF NOT EXISTS senado;")
@@ -238,8 +288,9 @@ def ensure_schema(cursor):
             codigo_parlamentar INTEGER REFERENCES senado.parlamentar(codigo) ON DELETE CASCADE,
             uf CHAR(2),
             descricao_participacao VARCHAR(50),
-            primeira_legislatura VARCHAR(10) REFERENCES senado.legislatura(numero),
-            segunda_legislatura VARCHAR(10) REFERENCES senado.legislatura(numero)
+            primeira_legislatura VARCHAR(10) NOT NULL REFERENCES senado.legislatura(numero),
+            segunda_legislatura VARCHAR(10) NOT NULL DEFAULT '' REFERENCES senado.legislatura(numero),
+            CONSTRAINT mandato_legislatura_check CHECK (primeira_legislatura IS NOT NULL AND TRIM(primeira_legislatura) != '')
         );
     """)
 
@@ -257,9 +308,24 @@ def ensure_schema(cursor):
             data_despesa DATE,
             detalhamento TEXT,
             valor_reembolsado NUMERIC(10,2),
-            tipo_documento VARCHAR(50)
+            tipo_documento VARCHAR(50),
+            UNIQUE(ano, mes, cod_senador, documento, valor_reembolsado, fornecedor)
         );
-    """)
+    """);
+    
+    # Remove duplicatas existentes na senado.despesa_ceaps (mantém apenas uma por grupo)
+    cursor.execute("""
+        DELETE FROM senado.despesa_ceaps WHERE id IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY ano, mes, cod_senador, COALESCE(documento,''), COALESCE(valor_reembolsado,0), COALESCE(fornecedor,'')
+                    ORDER BY id
+                ) as rn
+                FROM senado.despesa_ceaps
+            ) sub WHERE rn > 1
+        );
+    """);
+    logging.info(f"Duplicatas removidas de senado.despesa_ceaps.")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS senado.materia (
@@ -270,10 +336,70 @@ def ensure_schema(cursor):
             numero VARCHAR(20),
             ano INTEGER,
             ementa TEXT,
-            data DATE
+            data DATE,
+            -- Novos campos do endpoint /processo
+            id_processo INTEGER,
+            situacao_atual TEXT,
+            data_situacao_atual DATE,
+            tramitando BOOLEAN DEFAULT FALSE,
+            url_documento TEXT,
+            objetivo VARCHAR(50),
+            tipo_conteudo TEXT,
+            casa_identificadora VARCHAR(10),
+            ente_identificador VARCHAR(10),
+            indexacao TEXT,
+            data_ultima_atualizacao TIMESTAMP
         );
+    """);
+    
+    # Migração: adiciona colunas se não existirem (para banco existente)
+    cursor.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'id_processo') THEN
+                ALTER TABLE senado.materia ADD COLUMN id_processo INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'situacao_atual') THEN
+                ALTER TABLE senado.materia ADD COLUMN situacao_atual TEXT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'data_situacao_atual') THEN
+                ALTER TABLE senado.materia ADD COLUMN data_situacao_atual DATE;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'tramitando') THEN
+                ALTER TABLE senado.materia ADD COLUMN tramitando BOOLEAN DEFAULT FALSE;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'url_documento') THEN
+                ALTER TABLE senado.materia ADD COLUMN url_documento TEXT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'objetivo') THEN
+                ALTER TABLE senado.materia ADD COLUMN objetivo VARCHAR(50);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'tipo_conteudo') THEN
+                ALTER TABLE senado.materia ADD COLUMN tipo_conteudo TEXT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'casa_identificadora') THEN
+                ALTER TABLE senado.materia ADD COLUMN casa_identificadora VARCHAR(10);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'ente_identificador') THEN
+                ALTER TABLE senado.materia ADD COLUMN ente_identificador VARCHAR(10);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'indexacao') THEN
+                ALTER TABLE senado.materia ADD COLUMN indexacao TEXT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'data_ultima_atualizacao') THEN
+                ALTER TABLE senado.materia ADD COLUMN data_ultima_atualizacao TIMESTAMP;
+            END IF;
+        END
+        $$;
     """)
-
+    
+    # Índices para a tabela materia
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_senado_materia_ano ON senado.materia(ano);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_senado_materia_sigla ON senado.materia(sigla);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_senado_materia_situacao ON senado.materia(situacao_atual);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_senado_materia_tramitando ON senado.materia(tramitando);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_senado_materia_id_processo ON senado.materia(id_processo);")
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS senado.autoria (
             id SERIAL PRIMARY KEY,
@@ -282,6 +408,23 @@ def ensure_schema(cursor):
             autor_principal BOOLEAN,
             outros_autores BOOLEAN
         );
+    """)
+
+    # Atualiza a tabela autoria para aceitar autor_texto (fallback quando não há código)
+    cursor.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'autoria' AND column_name = 'autor_texto') THEN
+                ALTER TABLE senado.autoria ADD COLUMN autor_texto TEXT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'autoria' AND column_name = 'sigla_partido_autor') THEN
+                ALTER TABLE senado.autoria ADD COLUMN sigla_partido_autor VARCHAR(20);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'autoria' AND column_name = 'uf_autor') THEN
+                ALTER TABLE senado.autoria ADD COLUMN uf_autor CHAR(2);
+            END IF;
+        END
+        $$;
     """)
 
     cursor.execute("""
@@ -350,7 +493,8 @@ def ensure_schema(cursor):
             valor_pago NUMERIC(15,2),
             valor_resto_inscrito NUMERIC(15,2),
             valor_resto_cancelado NUMERIC(15,2),
-            valor_resto_pago NUMERIC(15,2)
+            valor_resto_pago NUMERIC(15,2),
+            UNIQUE(codigo_emenda, tipo_emenda, localidade_gasto, funcao, subfuncao)
         );
     """)
 
@@ -393,6 +537,10 @@ def ensure_schema(cursor):
         );
     """)
 
+    # Índices do schema portal
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_emendas_autor_lower ON portal.emendas(lower(autor));")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_emendas_ano ON portal.emendas(ano);")
+
     logging.info("Tabelas criadas/verificadas com sucesso.")
 
 
@@ -408,6 +556,7 @@ def main():
 
         conn.commit()
         logging.info("Banco de dados inicializado com sucesso!")
+
     except Exception as e:
         if conn:
             conn.rollback()

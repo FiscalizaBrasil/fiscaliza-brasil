@@ -1,0 +1,1088 @@
+ table_schema |          table_name           |            column_name            |          data_type          
+--------------+-------------------------------+-----------------------------------+-----------------------------
+ camara       | blocos                        | id                                | integer
+ camara       | blocos                        | nome                              | text
+ camara       | blocos                        | legislatura_id                    | integer
+ camara       | blocos                        | uri                               | text
+ camara       | blocos_partidos               | id                                | integer
+ camara       | blocos_partidos               | bloco_id                          | integer
+ camara       | blocos_partidos               | partido_id                        | integer
+ camara       | deputados                     | id                                | integer
+ camara       | deputados                     | nome_civil                        | text
+ camara       | deputados                     | cpf                               | character varying
+ camara       | deputados                     | sexo                              | character
+ camara       | deputados                     | data_nascimento                   | date
+ camara       | deputados                     | data_falecimento                  | date
+ camara       | deputados                     | uf_nascimento                     | character
+ camara       | deputados                     | municipio_nascimento              | text
+ camara       | deputados                     | escolaridade                      | text
+ camara       | deputados                     | email                             | text
+ camara       | deputados_despesas            | id                                | integer
+ camara       | deputados_despesas            | ano                               | integer
+ camara       | deputados_despesas            | mes                               | integer
+ camara       | deputados_despesas            | tipo_despesa                      | text
+ camara       | deputados_despesas            | cod_documento                     | bigint
+ camara       | deputados_despesas            | tipo_documento                    | text
+ camara       | deputados_despesas            | cod_tipo_documento                | integer
+ camara       | deputados_despesas            | data_documento                    | date
+ camara       | deputados_despesas            | num_documento                     | text
+ camara       | deputados_despesas            | valor_documento                   | numeric
+ camara       | deputados_despesas            | url_documento                     | text
+ camara       | deputados_despesas            | nome_fornecedor                   | text
+ camara       | deputados_despesas            | cnpj_cpf_fornecedor               | character varying
+ camara       | deputados_despesas            | valor_liquido                     | numeric
+ camara       | deputados_despesas            | valor_glosa                       | numeric
+ camara       | deputados_despesas            | num_ressarcimento                 | text
+ camara       | deputados_despesas            | cod_lote                          | integer
+ camara       | deputados_despesas            | parcela                           | integer
+ camara       | deputados_despesas            | mandato_id                        | character varying
+ camara       | deputados_despesas            | created_at                        | timestamp without time zone
+ camara       | deputados_gabinetes           | id                                | character varying
+ camara       | deputados_gabinetes           | mandato_id                        | character varying
+ camara       | deputados_gabinetes           | nome                              | text
+ camara       | deputados_gabinetes           | predio                            | text
+ camara       | deputados_gabinetes           | sala                              | text
+ camara       | deputados_gabinetes           | andar                             | text
+ camara       | deputados_gabinetes           | telefone                          | text
+ camara       | deputados_gabinetes           | email                             | text
+ camara       | deputados_lideres             | id                                | integer
+ camara       | deputados_lideres             | legislatura_id                    | integer
+ camara       | deputados_lideres             | deputado_id                       | integer
+ camara       | deputados_lideres             | titulo                            | text
+ camara       | deputados_lideres             | data_inicio                       | date
+ camara       | deputados_lideres             | data_fim                          | date
+ camara       | deputados_lideres             | created_at                        | timestamp without time zone
+ camara       | deputados_lideres             | bancada_tipo                      | text
+ camara       | deputados_lideres             | bancada_nome                      | text
+ camara       | deputados_mandatos            | id                                | character varying
+ camara       | deputados_mandatos            | deputado_id                       | integer
+ camara       | deputados_mandatos            | legislatura_id                    | integer
+ camara       | deputados_mandatos            | nome_eleitoral                    | text
+ camara       | deputados_mandatos            | sigla_partido                     | character varying
+ camara       | deputados_mandatos            | sigla_uf                          | character
+ camara       | deputados_mandatos            | url_foto                          | text
+ camara       | deputados_mandatos            | email                             | text
+ camara       | deputados_mandatos            | situacao                          | text
+ camara       | deputados_mandatos            | condicao_eleitoral                | text
+ camara       | deputados_mandatos            | data_inicio_mandato               | date
+ camara       | deputados_mandatos            | data_fim_mandato                  | date
+ camara       | deputados_mandatos_externos   | id                                | integer
+ camara       | deputados_mandatos_externos   | deputado_id                       | integer
+ camara       | deputados_mandatos_externos   | cargo                             | text
+ camara       | deputados_mandatos_externos   | sigla_uf                          | character
+ camara       | deputados_mandatos_externos   | municipio                         | text
+ camara       | deputados_mandatos_externos   | ano_inicio                        | integer
+ camara       | deputados_mandatos_externos   | ano_fim                           | integer
+ camara       | deputados_mandatos_externos   | sigla_partido_eleicao             | character varying
+ camara       | deputados_mandatos_externos   | created_at                        | timestamp without time zone
+ camara       | deputados_mesa                | id                                | integer
+ camara       | deputados_mesa                | deputado_id                       | integer
+ camara       | deputados_mesa                | legislatura_id                    | integer
+ camara       | deputados_mesa                | titulo                            | text
+ camara       | deputados_mesa                | data_inicio                       | date
+ camara       | deputados_mesa                | data_fim                          | date
+ camara       | deputados_ocupacoes           | id                                | integer
+ camara       | deputados_ocupacoes           | deputado_id                       | integer
+ camara       | deputados_ocupacoes           | titulo                            | text
+ camara       | deputados_ocupacoes           | entidade                          | text
+ camara       | deputados_ocupacoes           | entidade_uf                       | character
+ camara       | deputados_ocupacoes           | entidade_pais                     | text
+ camara       | deputados_ocupacoes           | ano_inicio                        | integer
+ camara       | deputados_ocupacoes           | ano_fim                           | integer
+ camara       | deputados_ocupacoes           | created_at                        | timestamp without time zone
+ camara       | deputados_profissoes          | id                                | integer
+ camara       | deputados_profissoes          | deputado_id                       | integer
+ camara       | deputados_profissoes          | data_hora                         | timestamp without time zone
+ camara       | deputados_profissoes          | cod_tipo_profissao                | integer
+ camara       | deputados_profissoes          | titulo                            | text
+ camara       | deputados_profissoes          | created_at                        | timestamp without time zone
+ camara       | deputados_redes_sociais       | id                                | integer
+ camara       | deputados_redes_sociais       | deputado_id                       | integer
+ camara       | deputados_redes_sociais       | tipo_rede                         | text
+ camara       | deputados_redes_sociais       | url                               | text
+ camara       | eventos                       | id                                | integer
+ camara       | eventos                       | uri                               | text
+ camara       | eventos                       | data_hora_inicio                  | timestamp without time zone
+ camara       | eventos                       | data_hora_fim                     | timestamp without time zone
+ camara       | eventos                       | situacao                          | text
+ camara       | eventos                       | descricao_tipo                    | text
+ camara       | eventos                       | descricao                         | text
+ camara       | eventos                       | local_externo                     | text
+ camara       | eventos                       | local_camara_nome                 | text
+ camara       | eventos                       | local_camara_predio               | text
+ camara       | eventos                       | local_camara_sala                 | text
+ camara       | eventos                       | local_camara_andar                | text
+ camara       | eventos                       | url_documento_pauta               | text
+ camara       | eventos                       | url_registro                      | text
+ camara       | eventos_orgaos                | id                                | integer
+ camara       | eventos_orgaos                | evento_id                         | integer
+ camara       | eventos_orgaos                | orgao_id                          | integer
+ camara       | eventos_pautas                | id                                | integer
+ camara       | eventos_pautas                | evento_id                         | integer
+ camara       | eventos_pautas                | ordem                             | integer
+ camara       | eventos_pautas                | topico                            | text
+ camara       | eventos_pautas                | regime                            | text
+ camara       | eventos_pautas                | cod_regime                        | integer
+ camara       | eventos_pautas                | titulo                            | text
+ camara       | eventos_pautas                | texto_parecer                     | text
+ camara       | eventos_pautas                | uri_votacao                       | text
+ camara       | eventos_pautas                | situacao_item                     | text
+ camara       | eventos_pautas                | proposicao_id                     | integer
+ camara       | eventos_pautas                | relator_id                        | integer
+ camara       | eventos_pautas                | created_at                        | timestamp without time zone
+ camara       | eventos_requerimentos         | id                                | integer
+ camara       | eventos_requerimentos         | evento_id                         | integer
+ camara       | eventos_requerimentos         | titulo                            | text
+ camara       | eventos_requerimentos         | uri_proposicao                    | text
+ camara       | eventos_requerimentos         | proposicao_id                     | integer
+ camara       | eventos_requerimentos         | created_at                        | timestamp without time zone
+ camara       | frentes                       | id                                | integer
+ camara       | frentes                       | titulo                            | text
+ camara       | frentes                       | legislatura_id                    | integer
+ camara       | frentes                       | telefone                          | text
+ camara       | frentes                       | email                             | text
+ camara       | frentes                       | keywords                          | text
+ camara       | frentes                       | situacao                          | text
+ camara       | frentes                       | url_website                       | text
+ camara       | frentes                       | url_documento                     | text
+ camara       | frentes                       | coordenador_id                    | integer
+ camara       | frentes                       | uri                               | text
+ camara       | frentes_deputados             | id                                | integer
+ camara       | frentes_deputados             | frente_id                         | integer
+ camara       | frentes_deputados             | deputado_id                       | integer
+ camara       | grupos_membros                | id                                | integer
+ camara       | grupos_membros                | grupo_id                          | integer
+ camara       | grupos_membros                | legislatura_id                    | integer
+ camara       | grupos_membros                | deputado_id                       | integer
+ camara       | grupos_membros                | ordem_entrada                     | integer
+ camara       | grupos_membros                | data_inicio                       | timestamp without time zone
+ camara       | grupos_membros                | data_fim                          | timestamp without time zone
+ camara       | grupos_membros                | cargo                             | text
+ camara       | grupos_membros                | created_at                        | timestamp without time zone
+ camara       | grupos_parlamentares          | id                                | integer
+ camara       | grupos_parlamentares          | uri                               | text
+ camara       | grupos_parlamentares          | nome                              | text
+ camara       | grupos_parlamentares          | ano_criacao                       | integer
+ camara       | grupos_parlamentares          | resolucao_titulo                  | text
+ camara       | grupos_parlamentares          | resolucao_uri                     | text
+ camara       | grupos_parlamentares          | subvencionado                     | boolean
+ camara       | grupos_parlamentares          | grupo_misto                       | boolean
+ camara       | grupos_parlamentares          | ativo                             | boolean
+ camara       | grupos_parlamentares          | observacoes                       | text
+ camara       | grupos_parlamentares          | projetotitulo                     | text
+ camara       | grupos_parlamentares          | projetouri                        | text
+ camara       | grupos_parlamentares          | created_at                        | timestamp without time zone
+ camara       | grupos_status                 | id                                | integer
+ camara       | grupos_status                 | grupo_id                          | integer
+ camara       | grupos_status                 | id_legislatura                    | integer
+ camara       | grupos_status                 | data_status                       | timestamp without time zone
+ camara       | grupos_status                 | presidente_nome                   | text
+ camara       | grupos_status                 | presidente_uri                    | text
+ camara       | grupos_status                 | oficio_titulo                     | text
+ camara       | grupos_status                 | oficio_uri                        | text
+ camara       | grupos_status                 | documento                         | text
+ camara       | grupos_status                 | oficio_autor_tipo                 | text
+ camara       | grupos_status                 | oficio_autor_nome                 | text
+ camara       | grupos_status                 | oficio_autor_uri                  | text
+ camara       | grupos_status                 | oficio_data_apresentacao          | timestamp without time zone
+ camara       | grupos_status                 | oficio_data_publicacao            | timestamp without time zone
+ camara       | grupos_status                 | observacao                        | text
+ camara       | grupos_status                 | eh_status_atual                   | boolean
+ camara       | grupos_status                 | created_at                        | timestamp without time zone
+ camara       | legislaturas                  | id                                | integer
+ camara       | legislaturas                  | data_inicio                       | date
+ camara       | legislaturas                  | data_fim                          | date
+ camara       | orgaos                        | id                                | integer
+ camara       | orgaos                        | sigla                             | character varying
+ camara       | orgaos                        | nome                              | text
+ camara       | orgaos                        | apelido                           | text
+ camara       | orgaos                        | cod_tipo_orgao                    | integer
+ camara       | orgaos                        | tipo_orgao                        | text
+ camara       | orgaos                        | nome_publicacao                   | text
+ camara       | orgaos                        | nome_resumido                     | text
+ camara       | orgaos                        | data_inicio                       | date
+ camara       | orgaos                        | data_instalacao                   | date
+ camara       | orgaos                        | data_fim                          | date
+ camara       | orgaos                        | data_fim_original                 | date
+ camara       | orgaos                        | casa                              | character varying
+ camara       | orgaos                        | sala                              | text
+ camara       | orgaos                        | url_website                       | text
+ camara       | orgaos                        | uri                               | text
+ camara       | orgaos_deputados              | id                                | integer
+ camara       | orgaos_deputados              | deputado_id                       | integer
+ camara       | orgaos_deputados              | orgao_id                          | integer
+ camara       | orgaos_deputados              | cargo                             | text
+ camara       | orgaos_deputados              | data_inicio                       | date
+ camara       | orgaos_deputados              | data_fim                          | date
+ camara       | partidos                      | id                                | integer
+ camara       | partidos                      | sigla                             | character varying
+ camara       | partidos                      | nome                              | text
+ camara       | partidos                      | uri                               | text
+ camara       | partidos                      | numero_eleitoral                  | integer
+ camara       | partidos                      | url_logo                          | text
+ camara       | partidos                      | url_website                       | text
+ camara       | partidos_membros              | id                                | integer
+ camara       | partidos_membros              | partido_id                        | integer
+ camara       | partidos_membros              | legislatura_id                    | integer
+ camara       | partidos_membros              | deputado_id                       | integer
+ camara       | partidos_membros              | created_at                        | timestamp without time zone
+ camara       | partidos_status               | id                                | integer
+ camara       | partidos_status               | partido_id                        | integer
+ camara       | partidos_status               | legislatura_id                    | integer
+ camara       | partidos_status               | data_status                       | timestamp without time zone
+ camara       | partidos_status               | situacao                          | text
+ camara       | partidos_status               | total_posse                       | integer
+ camara       | partidos_status               | total_membros                     | integer
+ camara       | partidos_status               | lider_id                          | integer
+ camara       | proposicoes                   | id                                | integer
+ camara       | proposicoes                   | sigla_tipo                        | character varying
+ camara       | proposicoes                   | cod_tipo                          | integer
+ camara       | proposicoes                   | numero                            | integer
+ camara       | proposicoes                   | ano                               | integer
+ camara       | proposicoes                   | ementa                            | text
+ camara       | proposicoes                   | data_apresentacao                 | timestamp without time zone
+ camara       | proposicoes                   | descricao_tipo                    | text
+ camara       | proposicoes                   | ementa_detalhada                  | text
+ camara       | proposicoes                   | keywords                          | text
+ camara       | proposicoes                   | url_inteiro_teor                  | text
+ camara       | proposicoes                   | urn_final                         | text
+ camara       | proposicoes                   | texto                             | text
+ camara       | proposicoes                   | justificativa                     | text
+ camara       | proposicoes                   | uri                               | text
+ camara       | proposicoes                   | uri_orgao_numerador               | text
+ camara       | proposicoes                   | uri_prop_principal                | text
+ camara       | proposicoes                   | uri_prop_anterior                 | text
+ camara       | proposicoes                   | uri_prop_posterior                | text
+ camara       | proposicoes_autores           | id                                | integer
+ camara       | proposicoes_autores           | proposicao_id                     | integer
+ camara       | proposicoes_autores           | autor_id                          | integer
+ camara       | proposicoes_autores           | ordem_assinatura                  | integer
+ camara       | proposicoes_autores           | proponente                        | boolean
+ camara       | proposicoes_autores_entidades | id                                | integer
+ camara       | proposicoes_autores_entidades | referencia_id                     | integer
+ camara       | proposicoes_autores_entidades | nome                              | text
+ camara       | proposicoes_autores_entidades | uri                               | text
+ camara       | proposicoes_autores_entidades | tipo_autor_codigo                 | character varying
+ camara       | proposicoes_autores_tipos     | codigo                            | character varying
+ camara       | proposicoes_autores_tipos     | nome                              | character varying
+ camara       | proposicoes_autores_tipos     | descricao                         | text
+ camara       | proposicoes_autores_tipos     | categoria                         | character varying
+ camara       | proposicoes_relacionadas      | id                                | integer
+ camara       | proposicoes_relacionadas      | proposicao_origem_id              | integer
+ camara       | proposicoes_relacionadas      | proposicao_relacionada_id         | integer
+ camara       | proposicoes_relacionadas      | tipo_relacao                      | character varying
+ camara       | proposicoes_relacionadas      | created_at                        | timestamp without time zone
+ camara       | proposicoes_status            | id                                | integer
+ camara       | proposicoes_status            | proposicao_id                     | integer
+ camara       | proposicoes_status            | data_hora                         | timestamp without time zone
+ camara       | proposicoes_status            | sequencia                         | integer
+ camara       | proposicoes_status            | sigla_orgao                       | character varying
+ camara       | proposicoes_status            | uri_orgao                         | text
+ camara       | proposicoes_status            | uri_ultimo_relator                | text
+ camara       | proposicoes_status            | regime                            | text
+ camara       | proposicoes_status            | descricao_tramitacao              | text
+ camara       | proposicoes_status            | cod_tipo_tramitacao               | character varying
+ camara       | proposicoes_status            | descricao_situacao                | text
+ camara       | proposicoes_status            | cod_situacao                      | character varying
+ camara       | proposicoes_status            | despacho                          | text
+ camara       | proposicoes_status            | url                               | text
+ camara       | proposicoes_status            | ambito                            | text
+ camara       | proposicoes_status            | apreciacao                        | text
+ camara       | proposicoes_temas             | id                                | integer
+ camara       | proposicoes_temas             | proposicao_id                     | integer
+ camara       | proposicoes_temas             | tema                              | text
+ camara       | proposicoes_temas             | created_at                        | timestamp without time zone
+ camara       | summary_empresas_geral        | legislatura_id                    | integer
+ camara       | summary_empresas_geral        | total_empresas                    | integer
+ camara       | summary_empresas_geral        | total_pago                        | numeric
+ camara       | summary_empresas_geral        | total_contratos                   | integer
+ camara       | summary_empresas_geral        | last_updated                      | timestamp without time zone
+ camara       | summary_empresas_ranking      | id                                | integer
+ camara       | summary_empresas_ranking      | legislatura_id                    | integer
+ camara       | summary_empresas_ranking      | rank                              | integer
+ camara       | summary_empresas_ranking      | cnpj_raiz                         | text
+ camara       | summary_empresas_ranking      | nome_completo                     | text
+ camara       | summary_empresas_ranking      | total_valor                       | numeric
+ camara       | summary_empresas_ranking      | qtd_contratos                     | integer
+ camara       | summary_empresas_ranking      | principais_partidos               | text
+ camara       | summary_empresas_ranking      | percentual                        | numeric
+ camara       | summary_empresas_ranking      | nome_chave                        | text
+ camara       | votacoes                      | id                                | character varying
+ camara       | votacoes                      | uri                               | text
+ camara       | votacoes                      | data                              | date
+ camara       | votacoes                      | data_hora_registro                | timestamp without time zone
+ camara       | votacoes                      | sigla_orgao                       | character varying
+ camara       | votacoes                      | uri_orgao                         | text
+ camara       | votacoes                      | id_orgao                          | integer
+ camara       | votacoes                      | uri_evento                        | text
+ camara       | votacoes                      | id_evento                         | integer
+ camara       | votacoes                      | descricao                         | text
+ camara       | votacoes                      | aprovacao                         | integer
+ camara       | votacoes                      | desc_ultima_abertura_votacao      | text
+ camara       | votacoes                      | data_hora_ultima_abertura_votacao | timestamp without time zone
+ camara       | votacoes_orientacoes          | id                                | integer
+ camara       | votacoes_orientacoes          | votacao_id                        | character varying
+ camara       | votacoes_orientacoes          | orientacao_voto                   | text
+ camara       | votacoes_orientacoes          | cod_tipo_lideranca                | character varying
+ camara       | votacoes_orientacoes          | sigla_partido_bloco               | text
+ camara       | votacoes_orientacoes          | cod_partido_bloco                 | integer
+ camara       | votacoes_orientacoes          | uri_partido_bloco                 | text
+ camara       | votacoes_orientacoes          | created_at                        | timestamp without time zone
+ camara       | votacoes_proposicoes          | votacao_id                        | character varying
+ camara       | votacoes_proposicoes          | proposicao_id                     | integer
+ camara       | votacoes_proposicoes          | id                                | uuid
+ camara       | votacoes_votos                | votacao_id                        | character varying
+ camara       | votacoes_votos                | deputado_id                       | integer
+ camara       | votacoes_votos                | tipo_voto                         | text
+ camara       | votacoes_votos                | data_registro_voto                | timestamp without time zone
+ camara       | votacoes_votos                | created_at                        | timestamp without time zone
+ camara       | votacoes_votos                | id                                | uuid
+ portal       | emenda_documento_despesa      | id                                | integer
+ portal       | emenda_documento_despesa      | emenda_documento_id               | integer
+ portal       | emenda_documento_despesa      | codigo_documento                  | character varying
+ portal       | emenda_documento_despesa      | data                              | date
+ portal       | emenda_documento_despesa      | documento                         | text
+ portal       | emenda_documento_despesa      | documento_resumido                | text
+ portal       | emenda_documento_despesa      | observacao                        | text
+ portal       | emenda_documento_despesa      | funcao                            | text
+ portal       | emenda_documento_despesa      | subfuncao                         | text
+ portal       | emenda_documento_despesa      | programa                          | text
+ portal       | emenda_documento_despesa      | acao                              | text
+ portal       | emenda_documento_despesa      | subtitulo                         | text
+ portal       | emenda_documento_despesa      | fase                              | text
+ portal       | emenda_documento_despesa      | especie                           | text
+ portal       | emenda_documento_despesa      | favorecido                        | text
+ portal       | emenda_documento_despesa      | nome_favorecido                   | text
+ portal       | emenda_documento_despesa      | valor                             | numeric
+ portal       | emenda_documento_despesa      | orgao                             | text
+ portal       | emenda_documento_despesa      | orgao_superior                    | text
+ portal       | emenda_documento_despesa      | numero_processo                   | text
+ portal       | emenda_documentos             | id                                | integer
+ portal       | emenda_documentos             | api_id                            | bigint
+ portal       | emenda_documentos             | emenda_id                         | integer
+ portal       | emenda_documentos             | data                              | date
+ portal       | emenda_documentos             | fase                              | text
+ portal       | emenda_documentos             | codigo_documento                  | character varying
+ portal       | emenda_documentos             | codigo_documento_resumido         | text
+ portal       | emenda_documentos             | especie_tipo                      | text
+ portal       | emenda_documentos             | tipo_emenda                       | text
+ portal       | emendas                       | id                                | integer
+ portal       | emendas                       | codigo_emenda                     | character varying
+ portal       | emendas                       | ano                               | integer
+ portal       | emendas                       | tipo_emenda                       | text
+ portal       | emendas                       | autor                             | text
+ portal       | emendas                       | nome_autor                        | text
+ portal       | emendas                       | numero_emenda                     | text
+ portal       | emendas                       | localidade_gasto                  | text
+ portal       | emendas                       | funcao                            | text
+ portal       | emendas                       | subfuncao                         | text
+ portal       | emendas                       | valor_empenhado                   | numeric
+ portal       | emendas                       | valor_liquidado                   | numeric
+ portal       | emendas                       | valor_pago                        | numeric
+ portal       | emendas                       | valor_resto_inscrito              | numeric
+ portal       | emendas                       | valor_resto_cancelado             | numeric
+ portal       | emendas                       | valor_resto_pago                  | numeric
+ senado       | agenda_plenario               | id                                | integer
+ senado       | agenda_plenario               | codigo_sessao                     | integer
+ senado       | agenda_plenario               | dia_util                          | character varying
+ senado       | agenda_plenario               | data                              | date
+ senado       | agenda_plenario               | dia_semana                        | character varying
+ senado       | agenda_plenario               | mes                               | character varying
+ senado       | agenda_plenario               | horario                           | character varying
+ senado       | agenda_plenario               | hora                              | time without time zone
+ senado       | agenda_plenario               | numero_sessao                     | character varying
+ senado       | agenda_plenario               | tipo_sessao                       | character varying
+ senado       | agenda_plenario               | local_sessao                      | character varying
+ senado       | agenda_plenario               | casa                              | character
+ senado       | agenda_plenario               | sessao_legislativa                | character varying
+ senado       | agenda_plenario               | legislatura                       | character varying
+ senado       | agenda_plenario               | codigo_situacao_sessao            | integer
+ senado       | agenda_plenario               | situacao_sessao                   | character varying
+ senado       | agenda_plenario               | realizada                         | boolean
+ senado       | agenda_plenario               | pauta_confirmada                  | boolean
+ senado       | agenda_plenario               | tipo_presenca                     | character
+ senado       | agenda_reuniao                | id                                | integer
+ senado       | agenda_reuniao                | codigo_reuniao                    | integer
+ senado       | agenda_reuniao                | versao                            | timestamp without time zone
+ senado       | agenda_reuniao                | descricao                         | text
+ senado       | agenda_reuniao                | titulo                            | text
+ senado       | agenda_reuniao                | codigo_colegiado                  | integer
+ senado       | agenda_reuniao                | sigla_colegiado                   | character varying
+ senado       | agenda_reuniao                | nome_colegiado                    | character varying
+ senado       | agenda_reuniao                | data_inicio                       | timestamp without time zone
+ senado       | agenda_reuniao                | realizada                         | boolean
+ senado       | agenda_reuniao                | situacao                          | character varying
+ senado       | agenda_reuniao                | local                             | text
+ senado       | agenda_reuniao                | url_pauta                         | text
+ senado       | agenda_reuniao                | url_resultado                     | text
+ senado       | agenda_reuniao                | tipo_reuniao                      | character varying
+ senado       | agenda_reuniao                | numero_reuniao                    | integer
+ senado       | agenda_reuniao                | sessao_legislativa_codigo         | integer
+ senado       | agenda_reuniao                | sessao_legislativa_descricao      | character varying
+ senado       | agenda_reuniao                | mes_ano                           | character varying
+ senado       | aparte                        | id                                | integer
+ senado       | aparte                        | codigo_pronunciamento             | character varying
+ senado       | aparte                        | codigo_parlamentar                | integer
+ senado       | aparte                        | data_pronunciamento               | date
+ senado       | aparte                        | sigla_partido_na_data             | character varying
+ senado       | aparte                        | uf_na_data                        | character
+ senado       | aparte                        | sigla_casa_pronunciamento         | character varying
+ senado       | aparte                        | nome_casa_pronunciamento          | character varying
+ senado       | aparte                        | texto_resumo                      | text
+ senado       | aparte                        | indexacao                         | text
+ senado       | aparte                        | url_texto                         | text
+ senado       | aparte                        | url_texto_binario                 | text
+ senado       | aparte                        | codigo_tipo_uso_palavra           | integer
+ senado       | aparte                        | codigo_sessao                     | integer
+ senado       | aposentado                    | sequencial                        | integer
+ senado       | aposentado                    | nome                              | character varying
+ senado       | aposentado                    | tipo                              | character varying
+ senado       | aposentado                    | data_inicial                      | date
+ senado       | aposentado                    | remuneracao                       | numeric
+ senado       | ata_registro_preco            | id                                | integer
+ senado       | ata_registro_preco            | numero                            | character varying
+ senado       | ata_registro_preco            | objeto                            | text
+ senado       | ata_registro_preco            | licitacao_numero                  | character varying
+ senado       | ata_registro_preco            | licitacao_modalidade              | character varying
+ senado       | ata_registro_preco            | empresa_id                        | integer
+ senado       | ata_registro_preco            | data_assinatura                   | date
+ senado       | ata_registro_preco            | data_publicacao                   | date
+ senado       | ata_registro_preco            | data_inicio_vigencia              | date
+ senado       | ata_registro_preco            | data_fim_vigencia                 | date
+ senado       | ata_registro_preco            | fundamentacao_legal               | text
+ senado       | ata_registro_preco            | processo_principal                | character varying
+ senado       | ata_registro_preco            | ind_mao_de_obra                   | boolean
+ senado       | ata_registro_preco            | data_ultima_atualizacao           | date
+ senado       | ata_registro_preco            | sub_especie_sigla                 | character varying
+ senado       | ata_registro_preco            | sub_especie_nome                  | character varying
+ senado       | ato_concessao                 | id                                | integer
+ senado       | ato_concessao                 | codigo_suprido                    | integer
+ senado       | ato_concessao                 | codigo_ato                        | character varying
+ senado       | ato_concessao                 | data                              | date
+ senado       | ato_concessao                 | matricula_solicitante             | integer
+ senado       | ato_concessao                 | numero_processo                   | character varying
+ senado       | ato_concessao                 | ano                               | integer
+ senado       | ato_concessao                 | valor_total_elementos_despesa     | numeric
+ senado       | ato_concessao                 | valor_total_empenhos              | numeric
+ senado       | ato_concessao                 | valor_total_transacoes            | numeric
+ senado       | ato_concessao                 | valor_total_movimentacoes         | numeric
+ senado       | ato_concessao                 | data_aplicacao                    | date
+ senado       | ato_concessao                 | data_comprovacao                  | date
+ senado       | ato_concessao                 | prazo_aplicacao                   | integer
+ senado       | ato_concessao                 | prazo_comprovacao                 | integer
+ senado       | ato_concessao                 | regime_especial                   | boolean
+ senado       | autoria                       | id                                | integer
+ senado       | autoria                       | codigo_parlamentar                | integer
+ senado       | autoria                       | codigo_materia                    | integer
+ senado       | autoria                       | autor_principal                   | boolean
+ senado       | autoria                       | outros_autores                    | boolean
+ senado       | autoria_processo              | id                                | integer
+ senado       | autoria_processo              | processo_id                       | integer
+ senado       | autoria_processo              | autor                             | character varying
+ senado       | autoria_processo              | tipo_autor                        | character varying
+ senado       | autoria_processo              | codigo_parlamentar                | integer
+ senado       | autoria_processo              | uf                                | character
+ senado       | autoria_processo              | sigla_partido                     | character varying
+ senado       | autuacao_processo             | id                                | integer
+ senado       | autuacao_processo             | processo_id                       | integer
+ senado       | autuacao_processo             | numero                            | integer
+ senado       | autuacao_processo             | colegiado_sigla                   | character varying
+ senado       | autuacao_processo             | colegiado_nome                    | character varying
+ senado       | autuacao_processo             | data_inicio                       | date
+ senado       | autuacao_processo             | data_fim                          | date
+ senado       | autuacao_processo             | situacao_sigla                    | character varying
+ senado       | autuacao_processo             | situacao_descricao                | character varying
+ senado       | auxilio_moradia               | id                                | integer
+ senado       | auxilio_moradia               | nome_parlamentar                  | character varying
+ senado       | auxilio_moradia               | estado                            | character
+ senado       | auxilio_moradia               | partido                           | character varying
+ senado       | auxilio_moradia               | auxilio_moradia                   | boolean
+ senado       | auxilio_moradia               | imovel_funcional                  | boolean
+ senado       | auxilio_moradia               | codigo_parlamentar                | integer
+ senado       | bloco                         | id                                | integer
+ senado       | bloco                         | codigo                            | integer
+ senado       | bloco                         | nome                              | character varying
+ senado       | bloco                         | apelido                           | character varying
+ senado       | bloco                         | data_criacao                      | date
+ senado       | bloco                         | sigla_casa                        | character
+ senado       | bloco_partido                 | bloco_id                          | integer
+ senado       | bloco_partido                 | sigla_partido                     | character varying
+ senado       | bloco_partido                 | membros                           | integer
+ senado       | bloco_partido_membro          | id                                | integer
+ senado       | bloco_partido_membro          | bloco_id                          | integer
+ senado       | bloco_partido_membro          | sigla_partido                     | character varying
+ senado       | bloco_partido_membro          | data_adesao                       | date
+ senado       | bloco_partido_membro          | data_desligamento                 | date
+ senado       | bloco_partido_membro          | sequencia_ordem_dia               | integer
+ senado       | cargo_comissao                | id                                | integer
+ senado       | cargo_comissao                | codigo_comissao                   | integer
+ senado       | cargo_comissao                | cargo                             | character varying
+ senado       | cargo_comissao                | codigo_parlamentar                | integer
+ senado       | cargo_comissao                | data_inicio                       | date
+ senado       | cargo_comissao                | data_fim                          | date
+ senado       | cargo_mesa_congresso          | id                                | integer
+ senado       | cargo_mesa_congresso          | mesa_id                           | integer
+ senado       | cargo_mesa_congresso          | cargo                             | character varying
+ senado       | cargo_mesa_congresso          | codigo_cargo                      | integer
+ senado       | cargo_mesa_congresso          | codigo_parlamentar                | integer
+ senado       | cargo_mesa_congresso          | nome_parlamentar                  | character varying
+ senado       | cargo_mesa_congresso          | bancada                           | character varying
+ senado       | cargo_mesa_congresso          | codigo_deputado_na_camara         | integer
+ senado       | cargo_mesa_senado             | id                                | integer
+ senado       | cargo_mesa_senado             | mesa_id                           | integer
+ senado       | cargo_mesa_senado             | cargo                             | character varying
+ senado       | cargo_mesa_senado             | codigo_cargo                      | integer
+ senado       | cargo_mesa_senado             | codigo_parlamentar                | integer
+ senado       | cargo_mesa_senado             | nome_parlamentar                  | character varying
+ senado       | cargo_mesa_senado             | bancada                           | character varying
+ senado       | cargo_mesa_senado             | origem                            | character
+ senado       | comissao                      | codigo                            | integer
+ senado       | comissao                      | nome                              | character varying
+ senado       | comissao                      | sigla                             | character varying
+ senado       | comissao                      | data_inicio                       | date
+ senado       | comissao                      | titulares                         | integer
+ senado       | comissao                      | suplentes                         | integer
+ senado       | comissao                      | sigla_casa                        | character
+ senado       | comissao                      | nome_secretario                   | character varying
+ senado       | comissao                      | endereco_secretaria               | text
+ senado       | comissao                      | telefone_secretaria               | character varying
+ senado       | comissao                      | local_reuniao                     | text
+ senado       | comissao                      | email_contato                     | character varying
+ senado       | comissao                      | agenda_reuniao                    | text
+ senado       | comissao                      | fax                               | character varying
+ senado       | comissao                      | descricao_tipo                    | character varying
+ senado       | comissao                      | codigo_tipo                       | integer
+ senado       | comissao                      | comissao_pai                      | integer
+ senado       | comissao                      | finalidade                        | text
+ senado       | comissao                      | indicador_distr_partidaria        | character
+ senado       | comissao                      | texto_finalidade                  | text
+ senado       | comissao                      | subtitulo                         | text
+ senado       | comissao                      | publica                           | boolean
+ senado       | contrato                      | id                                | integer
+ senado       | contrato                      | numero                            | character varying
+ senado       | contrato                      | objeto                            | text
+ senado       | contrato                      | licitacao_numero                  | character varying
+ senado       | contrato                      | licitacao_modalidade              | character varying
+ senado       | contrato                      | empresa_id                        | integer
+ senado       | contrato                      | numero_formatado                  | character varying
+ senado       | contrato                      | data_assinatura                   | date
+ senado       | contrato                      | data_publicacao                   | date
+ senado       | contrato                      | data_inicio_vigencia              | date
+ senado       | contrato                      | data_fim_vigencia                 | date
+ senado       | contrato                      | fundamentacao_legal               | text
+ senado       | contrato                      | processo_principal                | character varying
+ senado       | contrato                      | ind_mao_de_obra                   | boolean
+ senado       | contrato                      | data_ultima_atualizacao           | date
+ senado       | contrato                      | sub_especie_sigla                 | character varying
+ senado       | contrato                      | sub_especie_nome                  | character varying
+ senado       | contrato                      | unidade_gestora_sigla             | character varying
+ senado       | contrato                      | unidade_gestora_nome              | character varying
+ senado       | convidado_reuniao             | id                                | integer
+ senado       | convidado_reuniao             | codigo_reuniao                    | integer
+ senado       | convidado_reuniao             | ordem                             | integer
+ senado       | convidado_reuniao             | nome                              | text
+ senado       | convidado_reuniao             | entidade                          | text
+ senado       | convidado_reuniao             | cargo                             | text
+ senado       | convidado_reuniao             | presente                          | boolean
+ senado       | convidado_reuniao             | por_video                         | boolean
+ senado       | convidado_reuniao             | url_apresentacao                  | text
+ senado       | despacho_processo             | id                                | integer
+ senado       | despacho_processo             | processo_id                       | integer
+ senado       | despacho_processo             | data                              | date
+ senado       | despacho_processo             | tipo_motivacao                    | character varying
+ senado       | despacho_processo             | colegiado_sigla                   | character varying
+ senado       | despacho_processo             | colegiado_nome                    | character varying
+ senado       | despesa_ceaps                 | id                                | bigint
+ senado       | despesa_ceaps                 | ano                               | integer
+ senado       | despesa_ceaps                 | mes                               | integer
+ senado       | despesa_ceaps                 | cod_senador                       | integer
+ senado       | despesa_ceaps                 | nome_senador                      | character varying
+ senado       | despesa_ceaps                 | tipo_despesa                      | text
+ senado       | despesa_ceaps                 | cpf_cnpj                          | character varying
+ senado       | despesa_ceaps                 | fornecedor                        | text
+ senado       | despesa_ceaps                 | documento                         | character varying
+ senado       | despesa_ceaps                 | data_despesa                      | date
+ senado       | despesa_ceaps                 | detalhamento                      | text
+ senado       | despesa_ceaps                 | valor_reembolsado                 | numeric
+ senado       | despesa_ceaps                 | tipo_documento                    | character varying
+ senado       | doma_relacionado_reuniao      | id                                | integer
+ senado       | doma_relacionado_reuniao      | codigo_reuniao                    | integer
+ senado       | doma_relacionado_reuniao      | id_doma                           | character varying
+ senado       | doma_relacionado_reuniao      | identificacao                     | character varying
+ senado       | doma_relacionado_reuniao      | ementa                            | text
+ senado       | doma_relacionado_reuniao      | url_download                      | text
+ senado       | doma_relacionado_reuniao      | tipo                              | character varying
+ senado       | emenda_orcamento              | id                                | integer
+ senado       | emenda_orcamento              | numero                            | character varying
+ senado       | emenda_orcamento              | ano                               | integer
+ senado       | emenda_orcamento              | autor_emenda                      | character varying
+ senado       | emenda_orcamento              | tipo                              | character varying
+ senado       | emenda_orcamento              | cnpj_favorecido                   | character varying
+ senado       | emenda_orcamento              | nome_favorecido                   | character varying
+ senado       | emenda_orcamento              | cod_orgao_uge                     | integer
+ senado       | emenda_orcamento              | nome_orgao_uge                    | character varying
+ senado       | emenda_orcamento              | cod_unidade_orcamentaria          | integer
+ senado       | emenda_orcamento              | nome_unidade_orcamentaria         | character varying
+ senado       | emenda_orcamento              | acao_orcamentaria                 | character varying
+ senado       | emenda_orcamento              | nota_empenho                      | character varying
+ senado       | emenda_orcamento              | oficio_id                         | integer
+ senado       | empenho_suprido               | id                                | integer
+ senado       | empenho_suprido               | ato_concessao_id                  | integer
+ senado       | empenho_suprido               | numero                            | character varying
+ senado       | empenho_suprido               | rubrica                           | character varying
+ senado       | empenho_suprido               | descricao                         | character varying
+ senado       | empenho_suprido               | valor_concedido                   | numeric
+ senado       | empenho_suprido               | valor_executado                   | numeric
+ senado       | empenho_suprido               | data                              | date
+ senado       | empresa                       | id                                | integer
+ senado       | empresa                       | nome                              | text
+ senado       | empresa                       | cpf_cnpj                          | character varying
+ senado       | encontro_detalhe              | codigo_sessao                     | integer
+ senado       | encontro_detalhe              | tipo_situacao_codigo              | integer
+ senado       | encontro_detalhe              | tipo_situacao_nome                | character varying
+ senado       | encontro_detalhe              | realizada                         | boolean
+ senado       | encontro_detalhe              | finalidade                        | text
+ senado       | encontro_detalhe              | informacao                        | text
+ senado       | encontro_detalhe              | local                             | character varying
+ senado       | encontro_detalhe              | dth_inclusao                      | timestamp without time zone
+ senado       | encontro_detalhe              | tipo_presenca                     | character
+ senado       | encontro_detalhe              | permite_presenca                  | boolean
+ senado       | encontro_detalhe              | permite_voto                      | boolean
+ senado       | encontro_detalhe              | contem_votacao_secreta            | boolean
+ senado       | encontro_detalhe              | publica_pauta                     | boolean
+ senado       | encontro_detalhe              | link_remoto                       | text
+ senado       | encontro_detalhe              | link_video                        | text
+ senado       | encontro_detalhe              | info_acesso_remoto                | text
+ senado       | encontro_detalhe              | resumo_finalidade                 | text
+ senado       | encontro_detalhe              | resumo_tipo_presenca              | character varying
+ senado       | encontro_detalhe              | resumo_permite_presenca           | boolean
+ senado       | encontro_detalhe              | resumo_permite_voto               | boolean
+ senado       | encontro_detalhe              | resumo_contem_votacao_secreta     | boolean
+ senado       | ente_processo                 | id                                | integer
+ senado       | ente_processo                 | sigla                             | character varying
+ senado       | ente_processo                 | nome                              | character varying
+ senado       | ente_processo                 | casa                              | character
+ senado       | ente_processo                 | tipo                              | character varying
+ senado       | ente_processo                 | data_inicio                       | date
+ senado       | ente_processo                 | data_fim                          | date
+ senado       | escritorio_apoio              | id                                | integer
+ senado       | escritorio_apoio              | nome_parlamentar                  | character varying
+ senado       | escritorio_apoio              | estado                            | character
+ senado       | escritorio_apoio              | partido                           | character varying
+ senado       | escritorio_apoio              | setor                             | text
+ senado       | escritorio_apoio              | endereco                          | text
+ senado       | escritorio_apoio              | telefone                          | character varying
+ senado       | escritorio_apoio              | fax                               | character varying
+ senado       | escritorio_apoio              | codigo_parlamentar                | integer
+ senado       | exercicio_mandato             | id                                | integer
+ senado       | exercicio_mandato             | codigo_mandato                    | character varying
+ senado       | exercicio_mandato             | codigo_exercicio                  | character varying
+ senado       | exercicio_mandato             | data_inicio                       | date
+ senado       | exercicio_mandato             | data_fim                          | date
+ senado       | exercicio_mandato             | sigla_causa_afastamento           | character varying
+ senado       | exercicio_mandato             | descricao_causa_afastamento       | text
+ senado       | exercicio_mandato             | data_leitura                      | date
+ senado       | filiacao                      | id                                | integer
+ senado       | filiacao                      | codigo_parlamentar                | integer
+ senado       | filiacao                      | sigla_partido                     | character varying
+ senado       | filiacao                      | data_filiacao                     | date
+ senado       | filiacao                      | data_desfiliacao                  | date
+ senado       | filiacao_mandato              | id                                | integer
+ senado       | filiacao_mandato              | codigo_mandato                    | character varying
+ senado       | filiacao_mandato              | sigla_partido                     | character varying
+ senado       | filiacao_mandato              | data_filiacao                     | date
+ senado       | filiacao_mandato              | data_desfiliacao                  | date
+ senado       | item_ata                      | ata_id                            | integer
+ senado       | item_ata                      | item_id                           | integer
+ senado       | item_ata                      | numero                            | integer
+ senado       | item_ata                      | descricao                         | text
+ senado       | item_ata                      | quantidade                        | integer
+ senado       | item_ata                      | data_atualizacao                  | date
+ senado       | item_pauta                    | id                                | integer
+ senado       | item_pauta                    | codigo_encontro                   | integer
+ senado       | item_pauta                    | codigo_item                       | character varying
+ senado       | item_pauta                    | cod_materia                       | integer
+ senado       | item_pauta                    | sequencial                        | integer
+ senado       | item_pauta                    | identificacao                     | text
+ senado       | item_pauta                    | ementa                            | text
+ senado       | item_pauta                    | apreciacao                        | text
+ senado       | item_pauta                    | cabecalho                         | text
+ senado       | item_pauta                    | rodape                            | text
+ senado       | item_pauta                    | situacao                          | character varying
+ senado       | item_pauta                    | tipo_apreciacao                   | integer
+ senado       | legislacao_documento          | id                                | character varying
+ senado       | legislacao_documento          | tipo                              | character varying
+ senado       | legislacao_documento          | descricao                         | text
+ senado       | legislacao_documento          | sequencia                         | character varying
+ senado       | legislacao_documento          | norma                             | character varying
+ senado       | legislacao_documento          | norma_nome                        | text
+ senado       | legislacao_documento          | ementa                            | text
+ senado       | legislacao_documento          | data_assinatura                   | date
+ senado       | legislacao_documento          | ano_assinatura                    | integer
+ senado       | legislacao_documento          | apelido                           | character varying
+ senado       | legislacao_documento          | arquivo_ano                       | integer
+ senado       | legislatura                   | numero                            | character varying
+ senado       | legislatura                   | data_inicio                       | date
+ senado       | legislatura                   | data_fim                          | date
+ senado       | licenca                       | id                                | integer
+ senado       | licenca                       | codigo_licenca                    | character varying
+ senado       | licenca                       | codigo_parlamentar                | integer
+ senado       | licenca                       | data_inicio                       | date
+ senado       | licenca                       | data_inicio_prevista              | date
+ senado       | licenca                       | data_fim                          | date
+ senado       | licenca                       | data_fim_prevista                 | date
+ senado       | licenca                       | sigla_tipo_afastamento            | character varying
+ senado       | licenca                       | descricao_tipo_afastamento        | text
+ senado       | licitacao                     | id                                | integer
+ senado       | licitacao                     | numero                            | character varying
+ senado       | licitacao                     | objeto                            | text
+ senado       | licitacao                     | abertura                          | date
+ senado       | licitacao                     | situacao                          | character varying
+ senado       | licitacao                     | edital                            | text
+ senado       | licitacao                     | modalidade                        | character varying
+ senado       | licitacao                     | registro_preco                    | boolean
+ senado       | licitacao                     | orgao_origem                      | character varying
+ senado       | licitacao_detalhamento        | id                                | integer
+ senado       | licitacao_detalhamento        | licitacao_id                      | integer
+ senado       | licitacao_detalhamento        | tipo                              | character varying
+ senado       | licitacao_detalhamento        | criacao                           | date
+ senado       | licitacao_detalhamento        | descricao                         | text
+ senado       | licitacao_detalhamento        | link                              | text
+ senado       | lideranca                     | id                                | integer
+ senado       | lideranca                     | codigo_lideranca                  | integer
+ senado       | lideranca                     | codigo_parlamentar                | integer
+ senado       | lideranca                     | id_tipo_unidade_lideranca         | integer
+ senado       | lideranca                     | tipo_lideranca                    | character
+ senado       | lideranca                     | data_designacao                   | date
+ senado       | lideranca                     | data_fim                          | date
+ senado       | lideranca                     | numero_ordem_vice                 | integer
+ senado       | lideranca                     | bloco_codigo                      | integer
+ senado       | lideranca                     | sigla_partido                     | character varying
+ senado       | lideranca                     | casa                              | character
+ senado       | lote_emenda_orcamento         | id                                | integer
+ senado       | lote_emenda_orcamento         | nome_autor_orcamento              | character varying
+ senado       | lote_emenda_orcamento         | indicador_ativo                   | boolean
+ senado       | lote_emenda_orcamento         | email_autor_orcamento             | character varying
+ senado       | lote_emenda_orcamento         | codigo_autor_orcamento            | character varying
+ senado       | lote_emenda_orcamento         | data_operacao                     | date
+ senado       | lote_emenda_orcamento         | quantidade_emendas                | integer
+ senado       | lote_emenda_orcamento         | ano_execucao                      | integer
+ senado       | lote_emenda_orcamento         | numero_materia                    | character varying
+ senado       | lote_emenda_orcamento         | ano_materia                       | integer
+ senado       | lote_emenda_orcamento         | sigla_tipo_pl_orcamento           | character varying
+ senado       | lote_emenda_orcamento         | descricao_tipo_pl_orcamento       | character varying
+ senado       | mandato                       | codigo_mandato                    | character varying
+ senado       | mandato                       | codigo_parlamentar                | integer
+ senado       | mandato                       | uf                                | character
+ senado       | mandato                       | descricao_participacao            | character varying
+ senado       | mandato                       | primeira_legislatura              | character varying
+ senado       | mandato                       | segunda_legislatura               | character varying
+ senado       | materia                       | codigo                            | integer
+ senado       | materia                       | identificacao_processo            | character varying
+ senado       | materia                       | descricao_identificacao           | character varying
+ senado       | materia                       | sigla                             | character varying
+ senado       | materia                       | numero                            | character varying
+ senado       | materia                       | ano                               | integer
+ senado       | materia                       | ementa                            | text
+ senado       | materia                       | data                              | date
+ senado       | membro_comissao               | id                                | integer
+ senado       | membro_comissao               | codigo_comissao                   | integer
+ senado       | membro_comissao               | codigo_parlamentar                | integer
+ senado       | membro_comissao               | tipo_vaga                         | character varying
+ senado       | membro_comissao               | ordem                             | integer
+ senado       | membro_comissao               | bloco_id                          | integer
+ senado       | membro_comissao               | data_inicio                       | date
+ senado       | membro_comissao               | data_fim                          | date
+ senado       | membro_orgao                  | id                                | integer
+ senado       | membro_orgao                  | orgao_codigo                      | integer
+ senado       | membro_orgao                  | codigo_parlamentar                | integer
+ senado       | membro_orgao                  | nome_parlamentar                  | character varying
+ senado       | membro_orgao                  | tipo_vaga                         | character varying
+ senado       | membro_orgao                  | ordem                             | integer
+ senado       | membro_orgao                  | data_designacao                   | date
+ senado       | membro_orgao                  | data_fim                          | date
+ senado       | membro_orgao                  | observacao                        | text
+ senado       | mesa_congresso                | id                                | integer
+ senado       | mesa_congresso                | codigo_colegiado                  | integer
+ senado       | mesa_congresso                | nome_colegiado                    | character varying
+ senado       | mesa_congresso                | sigla_colegiado                   | character varying
+ senado       | mesa_senado                   | id                                | integer
+ senado       | mesa_senado                   | codigo_colegiado                  | integer
+ senado       | mesa_senado                   | nome_colegiado                    | character varying
+ senado       | mesa_senado                   | sigla_colegiado                   | character varying
+ senado       | mesa_senado                   | data_inicio                       | date
+ senado       | mesa_senado                   | titulares                         | integer
+ senado       | mesa_senado                   | suplentes                         | integer
+ senado       | movimentacao_suprido          | id                                | integer
+ senado       | movimentacao_suprido          | ato_concessao_id                  | integer
+ senado       | movimentacao_suprido          | tipo_inscricao                    | character varying
+ senado       | movimentacao_suprido          | inscricao                         | character varying
+ senado       | movimentacao_suprido          | fornecedor                        | character varying
+ senado       | movimentacao_suprido          | valor                             | numeric
+ senado       | movimentacao_suprido          | numero                            | character varying
+ senado       | movimentacao_suprido          | rubricas                          | character varying
+ senado       | movimentacao_suprido          | tipo                              | character varying
+ senado       | movimentacao_suprido          | data                              | date
+ senado       | nota_empenho                  | id                                | integer
+ senado       | nota_empenho                  | numero                            | character varying
+ senado       | nota_empenho                  | objeto                            | text
+ senado       | nota_empenho                  | licitacao_numero                  | character varying
+ senado       | nota_empenho                  | licitacao_modalidade              | character varying
+ senado       | nota_empenho                  | empresa_id                        | integer
+ senado       | nota_empenho                  | data_assinatura                   | date
+ senado       | nota_empenho                  | data_publicacao                   | date
+ senado       | nota_empenho                  | data_inicio_vigencia              | date
+ senado       | nota_empenho                  | data_fim_vigencia                 | date
+ senado       | nota_empenho                  | fundamentacao_legal               | text
+ senado       | nota_empenho                  | processo_principal                | character varying
+ senado       | nota_empenho                  | ind_mao_de_obra                   | boolean
+ senado       | nota_empenho                  | data_ultima_atualizacao           | date
+ senado       | nota_empenho                  | sub_especie_sigla                 | character varying
+ senado       | nota_empenho                  | sub_especie_nome                  | character varying
+ senado       | observacao                    | id                                | integer
+ senado       | observacao                    | codigo_comissao                   | integer
+ senado       | observacao                    | linha                             | character varying
+ senado       | observacao                    | texto                             | text
+ senado       | observacao                    | data_publicacao                   | date
+ senado       | observacao                    | veiculo_publicacao                | character varying
+ senado       | observacao                    | pagina_inicial                    | integer
+ senado       | observacao                    | pagina_final                      | integer
+ senado       | oficio_emenda                 | id                                | integer
+ senado       | oficio_emenda                 | tratamento                        | character varying
+ senado       | oficio_emenda                 | nome_autor                        | character varying
+ senado       | oficio_emenda                 | numero_protocolo_apresentacao     | character varying
+ senado       | oficio_emenda                 | data_inclusao                     | timestamp without time zone
+ senado       | orador_aparte                 | id                                | integer
+ senado       | orador_aparte                 | codigo_pronunciamento             | character varying
+ senado       | orador_aparte                 | codigo_parlamentar                | integer
+ senado       | orador_aparte                 | nome_parlamentar                  | character varying
+ senado       | orador_aparte                 | sigla_partido_na_data             | character varying
+ senado       | orador_aparte                 | uf_na_data                        | character
+ senado       | orgao                         | codigo                            | integer
+ senado       | orgao                         | nome                              | character varying
+ senado       | orgao                         | sigla                             | character varying
+ senado       | orgao                         | finalidade                        | text
+ senado       | orgao                         | data_inicio                       | date
+ senado       | orgao                         | codigo_tipo_colegiado             | integer
+ senado       | orgao_gestor_ata              | id                                | integer
+ senado       | orgao_gestor_ata              | ata_id                            | integer
+ senado       | orgao_gestor_ata              | sigla                             | character varying
+ senado       | orgao_gestor_ata              | nome                              | character varying
+ senado       | orgao_gestor_ata              | tipo_gestao                       | character varying
+ senado       | orgao_gestor_contrato         | id                                | integer
+ senado       | orgao_gestor_contrato         | contrato_id                       | integer
+ senado       | orgao_gestor_contrato         | sigla                             | character varying
+ senado       | orgao_gestor_contrato         | nome                              | character varying
+ senado       | orgao_gestor_contrato         | tipo_gestao                       | character varying
+ senado       | orgao_gestor_nota_empenho     | id                                | integer
+ senado       | orgao_gestor_nota_empenho     | nota_empenho_id                   | integer
+ senado       | orgao_gestor_nota_empenho     | sigla                             | character varying
+ senado       | orgao_gestor_nota_empenho     | nome                              | character varying
+ senado       | orgao_gestor_nota_empenho     | tipo_gestao                       | character varying
+ senado       | parlamentar                   | codigo                            | integer
+ senado       | parlamentar                   | codigo_publico                    | integer
+ senado       | parlamentar                   | nome_parlamentar                  | character varying
+ senado       | parlamentar                   | nome_completo                     | character varying
+ senado       | parlamentar                   | sexo                              | character varying
+ senado       | parlamentar                   | url_foto                          | text
+ senado       | parlamentar                   | url_pagina                        | text
+ senado       | parlamentar                   | email                             | character varying
+ senado       | parlamentar                   | sigla_partido                     | character varying
+ senado       | parlamentar                   | uf                                | character
+ senado       | parlamentar                   | data_nascimento                   | date
+ senado       | parlamentar                   | naturalidade                      | character varying
+ senado       | parlamentar                   | uf_naturalidade                   | character
+ senado       | parlamentar                   | endereco                          | text
+ senado       | parlamentar                   | telefones                         | ARRAY
+ senado       | partido                       | sigla                             | character varying
+ senado       | partido_historico             | codigo                            | integer
+ senado       | partido_historico             | sigla                             | character varying
+ senado       | partido_historico             | nome                              | character varying
+ senado       | partido_historico             | data_criacao                      | date
+ senado       | partido_historico             | data_extincao                     | date
+ senado       | processo                      | id                                | integer
+ senado       | processo                      | codigo_materia                    | integer
+ senado       | processo                      | identificacao                     | character varying
+ senado       | processo                      | sigla                             | character varying
+ senado       | processo                      | numero                            | character varying
+ senado       | processo                      | ano                               | integer
+ senado       | processo                      | objetivo                          | character varying
+ senado       | processo                      | casa_identificadora               | character
+ senado       | processo                      | ementa                            | text
+ senado       | processo                      | tipo_documento                    | character varying
+ senado       | processo                      | data_apresentacao                 | date
+ senado       | processo                      | tramitando                        | boolean
+ senado       | publicacao_aparte             | id                                | integer
+ senado       | publicacao_aparte             | codigo_pronunciamento             | character varying
+ senado       | publicacao_aparte             | descricao_veiculo_publicacao      | character varying
+ senado       | publicacao_aparte             | data_publicacao                   | date
+ senado       | publicacao_aparte             | numero_pag_inicio                 | integer
+ senado       | publicacao_aparte             | numero_pag_fim                    | integer
+ senado       | publicacao_aparte             | indicador_republicacao            | boolean
+ senado       | publicacao_aparte             | url_diario                        | text
+ senado       | relatoria                     | id                                | integer
+ senado       | relatoria                     | codigo_parlamentar                | integer
+ senado       | relatoria                     | codigo_tipo_relator               | integer
+ senado       | relatoria                     | descricao_tipo_relator            | text
+ senado       | relatoria                     | data_designacao                   | date
+ senado       | relatoria                     | data_destituicao                  | date
+ senado       | relatoria                     | descricao_motivo_destituicao      | text
+ senado       | relatoria                     | codigo_materia                    | integer
+ senado       | relatoria                     | codigo_comissao                   | integer
+ senado       | reuniao_comissao              | codigo                            | integer
+ senado       | reuniao_comissao              | versao                            | timestamp without time zone
+ senado       | reuniao_comissao              | descricao                         | text
+ senado       | reuniao_comissao              | titulo                            | text
+ senado       | reuniao_comissao              | data_inicio                       | timestamp without time zone
+ senado       | reuniao_comissao              | realizada                         | boolean
+ senado       | reuniao_comissao              | situacao                          | character varying
+ senado       | reuniao_comissao              | local                             | text
+ senado       | reuniao_comissao              | url_pauta_simples                 | text
+ senado       | reuniao_comissao              | url_pauta_cheia                   | text
+ senado       | reuniao_comissao              | url_resultado                     | text
+ senado       | reuniao_comissao              | url_ata                           | text
+ senado       | reuniao_comissao              | tipo_presenca                     | character varying
+ senado       | reuniao_comissao              | tipo_codigo                       | integer
+ senado       | reuniao_comissao              | tipo_descricao                    | character varying
+ senado       | reuniao_comissao              | presidente_codigo                 | integer
+ senado       | reuniao_comissao              | presidente_nome                   | character varying
+ senado       | reuniao_comissao              | sessao_legislativa_codigo         | integer
+ senado       | reuniao_comissao              | sessao_legislativa_descricao      | character varying
+ senado       | sessao_legislativa            | id                                | integer
+ senado       | sessao_legislativa            | numero_legislatura                | character varying
+ senado       | sessao_legislativa            | numero_sessao                     | character varying
+ senado       | sessao_legislativa            | tipo_sessao_legislativa           | character varying
+ senado       | sessao_legislativa            | data_inicio                       | date
+ senado       | sessao_legislativa            | data_fim                          | date
+ senado       | sessao_legislativa            | data_inicio_intervalo             | date
+ senado       | sessao_legislativa            | data_fim_intervalo                | date
+ senado       | sessao_plenaria               | codigo_sessao                     | integer
+ senado       | sessao_plenaria               | sigla_casa_sessao                 | character
+ senado       | sessao_plenaria               | nome_casa_sessao                  | character varying
+ senado       | sessao_plenaria               | codigo_sessao_legislativa         | integer
+ senado       | sessao_plenaria               | sigla_tipo_sessao                 | character varying
+ senado       | sessao_plenaria               | numero_sessao                     | integer
+ senado       | sessao_plenaria               | data_sessao                       | date
+ senado       | sessao_plenaria               | hora_inicio_sessao                | time without time zone
+ senado       | summary_empresas_geral        | legislatura                       | integer
+ senado       | summary_empresas_geral        | total_empresas                    | integer
+ senado       | summary_empresas_geral        | total_pago                        | numeric
+ senado       | summary_empresas_geral        | total_contratos                   | integer
+ senado       | summary_empresas_geral        | last_updated                      | timestamp without time zone
+ senado       | summary_empresas_ranking      | id                                | integer
+ senado       | summary_empresas_ranking      | legislatura                       | integer
+ senado       | summary_empresas_ranking      | rank                              | integer
+ senado       | summary_empresas_ranking      | empresa                           | text
+ senado       | summary_empresas_ranking      | partidos                          | text
+ senado       | summary_empresas_ranking      | cnpj                              | text
+ senado       | summary_empresas_ranking      | valor_total                       | numeric
+ senado       | summary_empresas_ranking      | contratos                         | integer
+ senado       | summary_empresas_ranking      | percentual                        | numeric
+ senado       | suplente                      | id                                | integer
+ senado       | suplente                      | codigo_mandato                    | character varying
+ senado       | suplente                      | descricao_participacao            | character varying
+ senado       | suplente                      | codigo_parlamentar                | integer
+ senado       | suplente                      | nome_parlamentar                  | character varying
+ senado       | suprido                       | codigo                            | integer
+ senado       | suprido                       | nome                              | character varying
+ senado       | suprido                       | orgao_codigo                      | integer
+ senado       | suprido                       | orgao_nome                        | character varying
+ senado       | suprido                       | orgao_sigla                       | character varying
+ senado       | tipo_cargo                    | codigo                            | integer
+ senado       | tipo_cargo                    | descricao                         | character varying
+ senado       | tipo_cargo                    | ativo                             | boolean
+ senado       | tipo_colegiado                | codigo                            | integer
+ senado       | tipo_colegiado                | sigla                             | character varying
+ senado       | tipo_colegiado                | descricao                         | character varying
+ senado       | tipo_colegiado                | casa                              | character
+ senado       | tipo_colegiado                | natureza                          | character varying
+ senado       | tipo_colegiado                | ativo                             | boolean
+ senado       | tipo_comparecimento           | sigla                             | character varying
+ senado       | tipo_comparecimento           | descricao                         | character varying
+ senado       | tipo_sessao                   | codigo                            | integer
+ senado       | tipo_sessao                   | sigla_casa                        | character
+ senado       | tipo_sessao                   | sigla                             | character varying
+ senado       | tipo_sessao                   | descricao                         | character varying
+ senado       | tipo_sessao                   | data_inicio                       | date
+ senado       | tipo_unidade_lideranca        | id                                | integer
+ senado       | tipo_unidade_lideranca        | sigla                             | character varying
+ senado       | tipo_unidade_lideranca        | descricao                         | character varying
+ senado       | tipo_uso_palavra              | codigo                            | integer
+ senado       | tipo_uso_palavra              | sigla                             | character varying
+ senado       | tipo_uso_palavra              | descricao                         | character varying
+ senado       | tipo_uso_palavra              | indicador_ativo                   | boolean
+ senado       | tramitacao_processo           | id                                | integer
+ senado       | tramitacao_processo           | processo_id                       | integer
+ senado       | tramitacao_processo           | data                              | date
+ senado       | tramitacao_processo           | colegiado_sigla                   | character varying
+ senado       | tramitacao_processo           | colegiado_nome                    | character varying
+ senado       | tramitacao_processo           | situacao_sigla                    | character varying
+ senado       | tramitacao_processo           | situacao_descricao                | character varying
+ senado       | tramitacao_processo           | texto                             | text
+ senado       | transacao_suprido             | id                                | integer
+ senado       | transacao_suprido             | ato_concessao_id                  | integer
+ senado       | transacao_suprido             | tipo_inscricao                    | character varying
+ senado       | transacao_suprido             | inscricao                         | character varying
+ senado       | transacao_suprido             | fornecedor                        | character varying
+ senado       | transacao_suprido             | rubricas                          | character varying
+ senado       | transacao_suprido             | tipo                              | character varying
+ senado       | transacao_suprido             | data                              | date
+ senado       | transacao_suprido             | valor                             | numeric
+ senado       | transacao_suprido             | numero                            | character varying
+ senado       | video_reuniao                 | id                                | integer
+ senado       | video_reuniao                 | codigo_reuniao                    | integer
+ senado       | video_reuniao                 | ordem                             | integer
+ senado       | video_reuniao                 | url                               | character varying
+ senado       | votacao                       | codigo_votacao                    | integer
+ senado       | votacao                       | sigla_casa                        | character
+ senado       | votacao                       | codigo_reuniao                    | integer
+ senado       | votacao                       | data_hora_inicio                  | timestamp without time zone
+ senado       | votacao                       | numero_reuniao                    | integer
+ senado       | votacao                       | tipo_reuniao                      | character varying
+ senado       | votacao                       | codigo_comissao                   | integer
+ senado       | votacao                       | sigla_comissao                    | character varying
+ senado       | votacao                       | nome_comissao                     | character varying
+ senado       | votacao                       | codigo_parlamentar_presidente     | integer
+ senado       | votacao                       | nome_presidente                   | character varying
+ senado       | votacao                       | identificacao_materia             | character varying
+ senado       | votacao                       | descricao_materia                 | text
+ senado       | votacao                       | descricao_votacao                 | text
+ senado       | votacao                       | total_votos_sim                   | integer
+ senado       | votacao                       | total_votos_nao                   | integer
+ senado       | votacao                       | total_votos_abstencao             | integer
+ senado       | votacao_parlamentar           | id                                | integer
+ senado       | votacao_parlamentar           | codigo_parlamentar                | integer
+ senado       | votacao_parlamentar           | codigo_sessao_votacao             | character varying
+ senado       | votacao_parlamentar           | sequencial                        | integer
+ senado       | votacao_parlamentar           | indicador_votacao_secreta         | boolean
+ senado       | votacao_parlamentar           | descricao_votacao                 | text
+ senado       | votacao_parlamentar           | descricao_resultado               | character varying
+ senado       | votacao_parlamentar           | total_votos_sim                   | integer
+ senado       | votacao_parlamentar           | total_votos_nao                   | integer
+ senado       | votacao_parlamentar           | total_votos_abstencao             | integer
+ senado       | votacao_parlamentar           | sigla_descricao_voto              | character varying
+ senado       | votacao_parlamentar           | descricao_voto                    | text
+ senado       | votacao_parlamentar           | codigo_sessao                     | integer
+ senado       | votacao_parlamentar           | codigo_materia                    | integer
+ senado       | votacao_plenario              | id                                | integer
+ senado       | votacao_plenario              | codigo_sessao                     | integer
+ senado       | votacao_plenario              | codigo_materia                    | integer
+ senado       | votacao_plenario              | descricao_votacao                 | text
+ senado       | votacao_plenario              | resultado_votacao                 | character varying
+ senado       | votacao_plenario              | total_votos_sim                   | integer
+ senado       | votacao_plenario              | total_votos_nao                   | integer
+ senado       | votacao_plenario              | total_votos_abstencao             | integer
+ senado       | votacao_plenario              | data_sessao                       | date
+ senado       | voto                          | id                                | integer
+ senado       | voto                          | codigo_votacao                    | integer
+ senado       | voto                          | codigo_parlamentar                | integer
+ senado       | voto                          | qualidade_voto                    | character
+ senado       | voto                          | voto_presidente                   | boolean
+ senado       | voto                          | sigla_partido_na_votacao          | character varying
+ senado       | voto_plenario                 | id                                | integer
+ senado       | voto_plenario                 | votacao_plenario_id               | integer
+ senado       | voto_plenario                 | codigo_parlamentar                | integer
+ senado       | voto_plenario                 | sigla_voto                        | character varying
+ senado       | voto_plenario                 | descricao_voto                    | text
+(1084 rows)
+

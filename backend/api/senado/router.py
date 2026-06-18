@@ -3,18 +3,24 @@ from datetime import date
 import psycopg2
 import logging
 import threading
-from functools import lru_cache
+
+_log = logging.getLogger(__name__)
 
 # Garanta que este import está correto para sua estrutura
 import database.db as db
-from database.utils import get_maior_legislatura_senado, periodo_legislatura, get_foto_url_senado
+from database.utils import get_maior_legislatura_senado, get_legislatura_atual, periodo_legislatura, get_foto_url_senado
+from database.cache import ttl_cache
 from scripts.import_data import import_all_data, import_despesas_senado
-from scripts.scraper import fetch_despesas_senado_ano, fetch_despesas_senado_todas, start_background_scraper, fetch_emendas_parlamentar
+from scripts.scraper import fetch_despesas_senado_ano, fetch_despesas_senado_todas, fetch_emendas_parlamentar
 
 router = APIRouter(
     prefix="/senado",
     tags=["Senado"]
 )
+
+# Lock para evitar múltiplos downloads simultâneos do Senado
+_senado_download_lock = threading.Lock()
+_senado_download_in_progress = False
 
 
 # ============================================================
@@ -37,13 +43,13 @@ def _ensure_despesas_senado():
             count = cursor.fetchone()[0]
             
             if count == 0:
-                logging.info("Sem despesas CEAPS no banco. Disparando download prioritário...")
+                _log.info("Sem despesas CEAPS no banco. Disparando download prioritário...")
                 threading.Thread(
                     target=_download_and_import_despesas_senado,
                     daemon=True
                 ).start()
     except Exception as e:
-        logging.error(f"Erro ao verificar despesas do senado: {e}")
+        _log.error(f"Erro ao verificar despesas do senado: {e}")
     finally:
         if conn:
             db.release_db_connection(conn)
@@ -55,22 +61,53 @@ def _download_and_import_despesas_senado():
     Executado em thread separada.
     """
     try:
-        logging.info("Download prioritário: despesas CEAPS do Senado")
+        _log.info("Download prioritário: despesas CEAPS do Senado")
         anos = list(range(2023, 2027))
         for ano in anos:
             fetch_despesas_senado_ano(ano)
+            # Importa incrementalmente cada ano após baixar
+            conn = db.get_db_connection()
+            if conn:
+                try:
+                    import_despesas_senado(conn, ano=ano)
+                finally:
+                    db.release_db_connection(conn)
         
-        # Importa para o banco
-        conn = db.get_db_connection()
-        if conn:
-            try:
-                import_despesas_senado(conn)
-            finally:
-                db.release_db_connection(conn)
-        
-        logging.info("Download e importação de despesas CEAPS concluídos")
+        _log.info("Download e importação de despesas CEAPS concluídos")
     except Exception as e:
-        logging.error(f"Erro no download prioritário do senado: {e}")
+        _log.error(f"Erro no download prioritário do senado: {e}")
+
+
+def _download_and_import_senado_todas():
+    """
+    Baixa todas as despesas CEAPS do Senado (todos os anos disponíveis)
+    e importa para o banco de dados. Usa lock para evitar execução concorrente.
+    Executado em thread separada.
+    """
+    global _senado_download_in_progress
+    try:
+        _log.info("[SENADO] Download completo de despesas CEAPS (todos os anos)...")
+        from scripts.scraper.config import ANOS_PADRAO
+        for ano in ANOS_PADRAO:
+            fetch_despesas_senado_ano(ano)
+            # Importa incrementalmente cada ano após baixar
+            conn = db.get_db_connection()
+            if conn:
+                try:
+                    import_despesas_senado(conn, ano=ano)
+                    _log.info(f"[SENADO] Despesas de {ano} importadas para o banco.")
+                except Exception as import_err:
+                    _log.error(f"[SENADO] Erro ao importar despesas de {ano}: {import_err}")
+                finally:
+                    db.release_db_connection(conn)
+        
+        _log.info("[SENADO] Download e importação de todas as despesas CEAPS concluídos.")
+    except Exception as e:
+        _log.error(f"[SENADO] Erro no download completo: {e}")
+    finally:
+        with _senado_download_lock:
+            _senado_download_in_progress = False
+
 
 def _ensure_emendas_senador(senador_codigo: int, nome_senador: str):
     """
@@ -94,14 +131,14 @@ def _ensure_emendas_senador(senador_codigo: int, nome_senador: str):
             count = cursor.fetchone()[0]
             
             if count == 0:
-                logging.info(f"Sem emendas no banco para senador {senador_codigo} ({nome_senador}). Disparando download prioritário...")
+                _log.info(f"Sem emendas no banco para senador {senador_codigo} ({nome_senador}). Disparando download prioritário...")
                 threading.Thread(
                     target=_download_and_import_emendas_senador,
                     args=(senador_codigo, nome_senador),
                     daemon=True
                 ).start()
     except Exception as e:
-        logging.error(f"Erro ao verificar emendas do senador {senador_codigo}: {e}")
+        _log.error(f"Erro ao verificar emendas do senador {senador_codigo}: {e}")
     finally:
         if conn:
             db.release_db_connection(conn)
@@ -113,7 +150,7 @@ def _download_and_import_emendas_senador(senador_codigo: int, nome_senador: str)
     Executado em thread separada.
     """
     try:
-        logging.info(f"Download prioritário: emendas do senador {senador_codigo} ({nome_senador})")
+        _log.info(f"Download prioritário: emendas do senador {senador_codigo} ({nome_senador})")
         
         # Busca todas as páginas de emendas para este senador
         pagina = 1
@@ -133,11 +170,11 @@ def _download_and_import_emendas_senador(senador_codigo: int, nome_senador: str)
             if conn:
                 try:
                     import_emendas(conn)
-                    logging.info(f"Download e importação de emendas concluídos para senador {senador_codigo}")
+                    _log.info(f"Download e importação de emendas concluídos para senador {senador_codigo}")
                 finally:
                     db.release_db_connection(conn)
     except Exception as e:
-        logging.error(f"Erro no download prioritário de emendas do senador {senador_codigo}: {e}")
+        _log.error(f"Erro no download prioritário de emendas do senador {senador_codigo}: {e}")
 
 
 def _periodo_legislatura(legislatura: int):
@@ -145,7 +182,7 @@ def _periodo_legislatura(legislatura: int):
     return inicio, inicio + 3
 
 @router.get("/legislaturas", summary="Lista todas as legislaturas disponíveis na base")
-@lru_cache(maxsize=1)
+@ttl_cache(maxsize=1, ttl=3600, cache_name="senado_legislaturas")
 def get_legislaturas_senado():
     conn = None
     try:
@@ -193,9 +230,11 @@ def get_legislaturas_senado():
                         leg = 57 - (2023 - ano) // 4
                         legis_set.add(leg)
             
-            return sorted(list(legis_set), reverse=True)
+            # Filtra apenas legislaturas até a atual (não mostrar futuras)
+            legislatura_atual = get_legislatura_atual()
+            return sorted([leg for leg in legis_set if leg <= legislatura_atual], reverse=True)
     except Exception as e:
-        logging.error(f"Erro ao buscar legislaturas ativas senado: {e}")
+        _log.error(f"Erro ao buscar legislaturas ativas senado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar legislaturas")
     finally:
         if conn:
@@ -203,7 +242,7 @@ def get_legislaturas_senado():
 
 
 @router.get("/maior-legislatura", summary="Retorna a maior legislatura disponível na base")
-@lru_cache(maxsize=1)
+@ttl_cache(maxsize=1, ttl=3600, cache_name="senado_maior_legislatura")
 def get_maior_legislatura_senado_endpoint():
     conn = None
     try:
@@ -217,7 +256,7 @@ def get_maior_legislatura_senado_endpoint():
         
         return {"maior_legislatura": maior_leg, "db_vazio": False}
     except Exception as e:
-        logging.error(f"Erro ao buscar maior legislatura: {e}")
+        _log.error(f"Erro ao buscar maior legislatura: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar maior legislatura")
     finally:
         if conn:
@@ -290,7 +329,7 @@ def get_lista_senadores(legislatura: int):
             ]
         }
     except Exception as e:
-        logging.error(f"Erro ao buscar senadores: {e}")
+        _log.error(f"Erro ao buscar senadores: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar senadores")
     finally:
         if conn:
@@ -302,7 +341,7 @@ def get_lista_senadores(legislatura: int):
 
 
 @router.get("/{legislatura}/estatisticas")
-@lru_cache(maxsize=16)
+@ttl_cache(maxsize=16, ttl=300, cache_name="senado_estatisticas")
 def get_estatisticas_senado(legislatura: int):
     conn = None
     try:
@@ -390,7 +429,7 @@ def get_estatisticas_senado(legislatura: int):
                 ]
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar estatísticas: {e}")
+        _log.error(f"Erro ao buscar estatísticas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas")
     finally:
         if conn:
@@ -542,7 +581,7 @@ LIMIT 12;
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Erro ao buscar senador: {e}")
+        _log.error(f"Erro ao buscar senador: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar senador")
     finally:
         if conn:
@@ -692,7 +731,7 @@ WHERE codigo = %s;"""
             }
 
     except Exception as e:
-        logging.error(f"Erro ao buscar senador: {e}")
+        _log.error(f"Erro ao buscar senador: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar senador")
     finally:
         if conn:
@@ -800,14 +839,14 @@ def get_despesas_senador(legislatura: int, senador_codigo: int, pagina: int = 1)
                 }
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar despesas do senador: {e}")
+        _log.error(f"Erro ao buscar despesas do senador: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar despesas")
     finally:
         if conn:
             db.release_db_connection(conn)
 
 @router.get("/{legislatura}/despesas/estatisticas")
-@lru_cache(maxsize=16)
+@ttl_cache(maxsize=16, ttl=300, cache_name="senado_despesas_estatisticas")
 def get_despesas_estatisticas(legislatura: int):
     conn = None
     try:
@@ -970,7 +1009,7 @@ def get_despesas_estatisticas(legislatura: int):
                 ]
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar estatísticas de despesas: {e}")
+        _log.error(f"Erro ao buscar estatísticas de despesas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas")
     finally:
         if conn:
@@ -1065,12 +1104,29 @@ def get_materia_listar(
                         m.ano,
                         m.ementa,
                         m.data,
-                        autor.nome_parlamentar AS autor_principal
+                        m.situacao_atual,
+                        m.tramitando,
+                        m.identificacao_processo,
+                        m.descricao_identificacao,
+                        m.data_situacao_atual,
+                        m.url_documento,
+                        m.objetivo,
+                        m.tipo_conteudo,
+                        m.casa_identificadora,
+                        m.ente_identificador,
+                        m.data_ultima_atualizacao,
+                        autor.nome_parlamentar AS autor_principal,
+                        a.autor_texto
                     {from_clause_data}
                     {where_clause}
                     ORDER BY m.codigo, m.data DESC NULLS LAST, m.ano DESC
                 )
-                SELECT id, sigla, numero, ano, ementa, data, autor_principal
+                SELECT id, sigla, numero, ano, ementa, data,
+                       situacao_atual, tramitando, identificacao_processo,
+                       descricao_identificacao, data_situacao_atual,
+                       url_documento, objetivo, tipo_conteudo,
+                       casa_identificadora, ente_identificador,
+                       data_ultima_atualizacao, autor_principal, autor_texto
                 FROM materia_filtrada
                 ORDER BY ano DESC, sigla, numero
                 LIMIT %s OFFSET %s
@@ -1088,7 +1144,18 @@ def get_materia_listar(
                         "ano": r[3],
                         "ementa": r[4],
                         "dataApresentacao": r[5].isoformat() if hasattr(r[5], 'isoformat') else str(r[5]) if r[5] else None,
-                        "autor_principal": r[6]
+                        "situacaoAtual": r[6],
+                        "tramitando": r[7],
+                        "identificacao": r[8],
+                        "tipoDocumento": r[9],
+                        "dataSituacaoAtual": r[10].isoformat() if hasattr(r[10], 'isoformat') else str(r[10]) if r[10] else None,
+                        "urlDocumento": r[11],
+                        "objetivo": r[12],
+                        "tipoConteudo": r[13],
+                        "casaIdentificadora": r[14],
+                        "enteIdentificador": r[15],
+                        "dataUltimaAtualizacao": r[16].isoformat() if hasattr(r[16], 'isoformat') else str(r[16]) if r[16] else None,
+                        "autor_principal": r[17] or r[18]
                     }
                     for r in resultados
                 ],
@@ -1106,7 +1173,7 @@ def get_materia_listar(
                 }
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar matéria: {e}")
+        _log.error(f"Erro ao buscar matéria: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar matéria")
     finally:
         if conn:
@@ -1237,7 +1304,7 @@ def get_lista_emendas(
                 }
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar emendas: {e}")
+        _log.error(f"Erro ao buscar emendas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar emendas")
     finally:
         if conn:
@@ -1245,7 +1312,7 @@ def get_lista_emendas(
 
 
 @router.get("/{legislatura}/emendas/resumo", summary="Obtém resumo das emendas do Senado")
-@lru_cache(maxsize=32)
+@ttl_cache(maxsize=32, ttl=300, cache_name="senado_emendas_resumo")
 def get_resumo_emendas(legislatura: int):
     conn = None
     try:
@@ -1373,7 +1440,7 @@ def get_resumo_emendas(legislatura: int):
                 ]
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar resumo emendas: {e}")
+        _log.error(f"Erro ao buscar resumo emendas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar emendas")
     finally:
         if conn:
@@ -1433,7 +1500,7 @@ def get_votacao_materia(legislatura: int, codigo_materia: int):
                 ]
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar votação: {e}")
+        _log.error(f"Erro ao buscar votação: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar votação")
     finally:
         if conn:
@@ -1540,7 +1607,7 @@ def get_emendas_lista_senador(legislatura: int, senador_codigo: int, pagina: int
                 }
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar emendas do senador: {e}")
+        _log.error(f"Erro ao buscar emendas do senador: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar emendas")
     finally:
         if conn:
@@ -1641,7 +1708,7 @@ def get_estatisticas_empresas(legislatura: int):
                 "top_20_empresas": top_20
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar estatísticas de empresas: {e}")
+        _log.error(f"Erro ao buscar estatísticas de empresas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas de empresas")
     finally:
         if conn:
@@ -1660,34 +1727,34 @@ def get_resumo_principal_senado(legislatura: int = 0):
         if not conn:
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
-        with conn.cursor() as cursor:
-            # Se legislatura não foi informada (0), busca dados de todos os senadores
-            # sem filtrar por período de legislatura
-            usar_legislatura = legislatura if (legislatura and legislatura > 0) else None
-            
-            if not usar_legislatura:
-                # Verifica se há dados no banco
+        usar_legislatura = legislatura if (legislatura and legislatura > 0) else None
+        
+        if not usar_legislatura:
+            with conn.cursor() as cursor:
                 cursor.execute("SELECT COUNT(*) FROM senado.mandato")
                 total_mandatos = cursor.fetchone()[0]
+            
+            if total_mandatos == 0:
+                # Tenta importar dados dos JSONs baixados pelo scraper
+                _log.info("Banco vazio detectado. Tentando importar dados dos arquivos JSON...")
+                try:
+                    import_all_data(conn)
+                    _log.info("Importação concluída. Refazendo consulta...")
+                except Exception as import_err:
+                    _log.error(f"Erro ao importar dados: {import_err}")
                 
-                if total_mandatos == 0:
-                    # Tenta importar dados dos JSONs baixados pelo scraper
-                    logging.info("Banco vazio detectado. Tentando importar dados dos arquivos JSON...")
-                    try:
-                        import_all_data(conn)
-                        logging.info("Importação concluída. Refazendo consulta...")
-                    except Exception as import_err:
-                        logging.error(f"Erro ao importar dados: {import_err}")
-                    
+                with conn.cursor() as cursor:
                     cursor.execute("SELECT COUNT(*) FROM senado.mandato")
                     total_mandatos = cursor.fetchone()[0]
-                    if total_mandatos == 0:
-                        return {
-                            "total_parlamentares": 0,
-                            "gastos_12_meses": 0.0,
-                            "db_vazio": True
-                        }
-            
+                
+                if total_mandatos == 0:
+                    return {
+                        "total_parlamentares": 0,
+                        "gastos_12_meses": 0.0,
+                        "db_vazio": True
+                    }
+        
+        with conn.cursor() as cursor:
             # 1. Total de senadores
             query_total = "SELECT COUNT(DISTINCT codigo_parlamentar) FROM senado.mandato"
             params_total: list[object] = []
@@ -1747,11 +1814,15 @@ def get_resumo_principal_senado(legislatura: int = 0):
 
             # Se tem senadores mas não tem gastos, dispara download prioritário em background
             if not db_vazio and gastos_12_meses == 0:
-                logging.info("Resumo: senadores encontrados mas sem despesas. Disparando download prioritário...")
-                threading.Thread(
-                    target=fetch_despesas_senado_todas,
-                    daemon=True
-                ).start()
+                _log.info("Resumo: senadores encontrados mas sem despesas. Disparando download prioritário...")
+                global _senado_download_in_progress
+                with _senado_download_lock:
+                    if not _senado_download_in_progress:
+                        _senado_download_in_progress = True
+                        threading.Thread(
+                            target=_download_and_import_senado_todas,
+                            daemon=True
+                        ).start()
 
             return {
                 "total_parlamentares": total_senadores,
@@ -1759,7 +1830,7 @@ def get_resumo_principal_senado(legislatura: int = 0):
                 "db_vazio": db_vazio
             }
     except Exception as e:
-        logging.error(f"Erro no resumo principal do Senado: {e}")
+        _log.error(f"Erro no resumo principal do Senado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar resumo")
     finally:
         if conn:

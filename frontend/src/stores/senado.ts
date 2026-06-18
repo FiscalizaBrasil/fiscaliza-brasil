@@ -63,6 +63,17 @@ export interface ProjetoLegislativoSenado {
     ementa: string
     dataApresentacao: string | null
     autor_principal: string
+    situacaoAtual?: string
+    tramitando?: boolean
+    identificacao?: string
+    tipoDocumento?: string
+    dataSituacaoAtual?: string | null
+    urlDocumento?: string
+    objetivo?: string
+    tipoConteudo?: string
+    casaIdentificadora?: string
+    enteIdentificador?: string
+    dataUltimaAtualizacao?: string | null
 }
 
 export interface VotoSenador {
@@ -153,6 +164,8 @@ export const useSenadoStore = defineStore("senado", () => {
     const despesasTotalPages = ref(1)
     const currentCategorias = ref<any[]>([])
     const loadingDetail = ref(false)
+    const loadingDespesas = ref(false)
+    const loadingEmendas = ref(false)
 
     // General Stats state
     const generalStats = ref<EstatisticasSenado | null>(null)
@@ -313,7 +326,7 @@ export const useSenadoStore = defineStore("senado", () => {
     }
 
     const fetchDespesasSenador = async (id: number, page: number = 1) => {
-        loadingDetail.value = true
+        loadingDespesas.value = true
         try {
             const response = await fetch(`${apiUrl}/api/senado/${legislatura.value}/${id}/despesas?pagina=${page}`)
             if (!response.ok) throw new Error("Falha ao buscar despesas do senador")
@@ -324,11 +337,12 @@ export const useSenadoStore = defineStore("senado", () => {
             despesasPage.value = data.paginacao.pagina
             despesasTotalPages.value = data.paginacao.total_paginas
         } finally {
-            loadingDetail.value = false
+            loadingDespesas.value = false
         }
     }
 
     const fetchEmendasSenador = async (id: number, page: number = 1) => {
+        loadingEmendas.value = true
         try {
             const response = await fetch(`${apiUrl}/api/senado/${legislatura.value}/${id}/emendas/lista?pagina=${page}`)
             if (!response.ok) throw new Error("Falha ao buscar emendas")
@@ -338,6 +352,8 @@ export const useSenadoStore = defineStore("senado", () => {
             emendasTotalPages.value = data.paginacao.total_paginas
         } catch (e: any) {
             console.error("Erro ao buscar emendas do senador:", e)
+        } finally {
+            loadingEmendas.value = false
         }
     }
 
@@ -448,6 +464,17 @@ export const useSenadoStore = defineStore("senado", () => {
                 ementa: m.ementa,
                 dataApresentacao: m.dataApresentacao,
                 autor_principal: m.autor_principal,
+                situacaoAtual: m.situacaoAtual,
+                tramitando: m.tramitando,
+                identificacao: m.identificacao,
+                tipoDocumento: m.tipoDocumento,
+                dataSituacaoAtual: m.dataSituacaoAtual,
+                urlDocumento: m.urlDocumento,
+                objetivo: m.objetivo,
+                tipoConteudo: m.tipoConteudo,
+                casaIdentificadora: m.casaIdentificadora,
+                enteIdentificador: m.enteIdentificador,
+                dataUltimaAtualizacao: m.dataUltimaAtualizacao,
             }))
 
             if (pagina === 1) {
@@ -547,6 +574,8 @@ export const useSenadoStore = defineStore("senado", () => {
         despesasTotalPages,
         currentCategorias,
         loadingDetail,
+        loadingDespesas,
+        loadingEmendas,
         generalStats,
         senadorStats,
         loadingStats,

@@ -1,19 +1,31 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 import os
 import logging
 
-# Configura logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - [%(name)s] - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 from api.camara.router import router as camara_router
 from api.senado.router import router as senado_router
 from api.portal.router import router as portal_router
-from scripts.scraper import start_background_scraper, start_background_fotos, scraping_status
+from scripts.scraper import start_background_import, start_background_fotos, scraping_status
+from database.cache import get_cache_stats, invalidate_cache
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Iniciando downloads em background...")
+    start_background_fotos()
+    start_background_import()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # Configuração CORS
 origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -36,14 +48,6 @@ app.include_router(senado_router, prefix="/api")
 app.include_router(portal_router, prefix="/api")
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Inicia os scrapers em background quando a aplicação sobe."""
-    logger.info("Iniciando downloads em background...")
-    start_background_fotos()
-    start_background_scraper()
-
-
 @app.get("/")
 def read_root():
     return {"message": "API de Deputados em funcionamento"}
@@ -58,6 +62,24 @@ def health_check():
 def get_scraping_status():
     """Retorna o status atual do scraping em background."""
     return scraping_status
+
+
+@app.get("/api/cache-stats")
+def get_cache_stats_endpoint():
+    """Retorna estatísticas de todos os caches ativos."""
+    return get_cache_stats()
+
+
+@app.post("/api/cache-invalidate")
+def invalidate_cache_endpoint(cache_name: str = None):
+    """
+    Invalida um cache específico ou todos os caches.
+    
+    Args:
+        cache_name: Nome do cache a invalidar. Se None, invalida todos.
+    """
+    invalidate_cache(cache_name)
+    return {"status": "ok", "invalidated": cache_name or "all"}
 
 
 if __name__ == "__main__":

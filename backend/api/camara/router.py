@@ -4,18 +4,27 @@ from datetime import date
 import psycopg2
 import logging
 import threading
-from functools import lru_cache
+
+_log = logging.getLogger(__name__)
 
 # Garanta que este import está correto para sua estrutura
 import database.db as db
-from database.utils import get_maior_legislatura_camara, periodo_legislatura, get_foto_url_camara
-from scripts.import_data import import_all_data, import_despesas_camara
-from scripts.scraper import fetch_despesas_deputado, fetch_despesas_todas_camara, start_background_scraper, fetch_emendas_parlamentar
+from database.utils import get_maior_legislatura_camara, get_legislatura_atual, periodo_legislatura, get_foto_url_camara
+from database.cache import ttl_cache
+from scripts.import_data import import_all_data, import_despesas_camara, import_detalhes_deputados
+from scripts.scraper import fetch_despesas_deputado, fetch_despesas_todas_camara, fetch_emendas_parlamentar, fetch_detalhes_deputado
 
 router = APIRouter(
     prefix="/camara",
     tags=["Câmara"]
 )
+
+# Lock para evitar múltiplos downloads simultâneos da Câmara
+_camara_download_lock = threading.Lock()
+_camara_download_in_progress = False
+_despesas_downloading = set()
+_detalhes_downloading = set()
+_emendas_downloading = set()
 
 
 # ============================================================
@@ -27,6 +36,11 @@ def _ensure_despesas_deputado(deputado_id: int):
     Verifica se existem despesas no banco para o deputado.
     Se não houver, dispara o download prioritário em background.
     """
+    with _camara_download_lock:
+        if deputado_id in _despesas_downloading:
+            return
+        _despesas_downloading.add(deputado_id)
+    
     conn = None
     try:
         conn = db.get_db_connection()
@@ -42,14 +56,14 @@ def _ensure_despesas_deputado(deputado_id: int):
             count = cursor.fetchone()[0]
             
             if count == 0:
-                logging.info(f"Sem despesas no banco para deputado {deputado_id}. Disparando download prioritário...")
+                _log.info(f"Sem despesas no banco para deputado {deputado_id}. Disparando download prioritário...")
                 threading.Thread(
                     target=_download_and_import_despesas,
                     args=(deputado_id,),
                     daemon=True
                 ).start()
     except Exception as e:
-        logging.error(f"Erro ao verificar despesas do deputado {deputado_id}: {e}")
+        _log.error(f"Erro ao verificar despesas do deputado {deputado_id}: {e}")
     finally:
         if conn:
             db.release_db_connection(conn)
@@ -59,22 +73,143 @@ def _download_and_import_despesas(deputado_id: int):
     """
     Baixa as despesas de um deputado e importa para o banco.
     Executado em thread separada.
+    Também dispara download de emendas do mesmo deputado.
     """
     try:
-        logging.info(f"Download prioritário: despesas do deputado {deputado_id}")
+        _log.info(f"Download prioritário: despesas do deputado {deputado_id}")
         fetch_despesas_deputado(deputado_id)
         
-        # Importa para o banco
+        # Importa para o banco (apenas este deputado)
+        conn = db.get_db_connection()
+        if conn:
+            try:
+                import_despesas_camara(conn, deputado_id=deputado_id)
+            finally:
+                db.release_db_connection(conn)
+        
+        _log.info(f"Download e importação concluídos para deputado {deputado_id}")
+        
+        # Também dispara download de emendas para este deputado
+        try:
+            # Busca o nome do deputado no JSON
+            import json, os
+            dep_path = os.path.join(os.path.dirname(__file__), "..", "data", "camara", "deputados.json")
+            if os.path.isfile(dep_path):
+                with open(dep_path, "r", encoding="utf-8") as f:
+                    dep_data = json.load(f)
+                for dep in dep_data.get("dados", []):
+                    if dep["id"] == deputado_id:
+                        nome = dep.get("nome", "")
+                        if nome:
+                            _log.info(f"Download prioritário: emendas do deputado {deputado_id} ({nome})")
+                            threading.Thread(
+                                target=_download_and_import_emendas_deputado,
+                                args=(deputado_id, nome),
+                                daemon=True
+                            ).start()
+                        break
+        except Exception as e:
+            _log.error(f"Erro ao disparar download de emendas para deputado {deputado_id}: {e}")
+            
+    except Exception as e:
+        _log.error(f"Erro no download prioritário do deputado {deputado_id}: {e}")
+    finally:
+        with _camara_download_lock:
+            _despesas_downloading.discard(deputado_id)
+
+
+def _download_and_import_camara_todas():
+    """
+    Baixa todas as despesas de todos os deputados da Câmara e importa para o banco.
+    Usa lock para evitar execução concorrente.
+    Executado em thread separada.
+    """
+    global _camara_download_in_progress
+    try:
+        _log.info("[CÂMARA] Download completo de despesas de todos os deputados...")
+        fetch_despesas_todas_camara()
+        
+        # Importa todos os deputados para o banco
         conn = db.get_db_connection()
         if conn:
             try:
                 import_despesas_camara(conn)
+                _log.info("[CÂMARA] Despesas de todos os deputados importadas para o banco.")
+            except Exception as import_err:
+                _log.error(f"[CÂMARA] Erro ao importar despesas: {import_err}")
             finally:
                 db.release_db_connection(conn)
         
-        logging.info(f"Download e importação concluídos para deputado {deputado_id}")
+        _log.info("[CÂMARA] Download e importação de todas as despesas concluídos.")
     except Exception as e:
-        logging.error(f"Erro no download prioritário do deputado {deputado_id}: {e}")
+        _log.error(f"[CÂMARA] Erro no download completo: {e}")
+    finally:
+        with _camara_download_lock:
+            _camara_download_in_progress = False
+
+
+
+
+def _ensure_detalhes_deputado(deputado_id: int):
+    """
+    Verifica se existem detalhes (situacao/condicao_eleitoral) no banco para o deputado.
+    Se não houver, dispara o download prioritário em background.
+    """
+    with _camara_download_lock:
+        if deputado_id in _detalhes_downloading:
+            return
+        _detalhes_downloading.add(deputado_id)
+    
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        if not conn:
+            return
+        
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*) FROM camara.deputados_mandatos
+                WHERE deputado_id = %s AND condicao_eleitoral IS NULL
+            """, (deputado_id,))
+            count = cursor.fetchone()[0]
+            
+            if count > 0:
+                _log.info(f"Sem detalhes no banco para deputado {deputado_id}. Disparando download prioritário...")
+                threading.Thread(
+                    target=_download_and_import_detalhes,
+                    args=(deputado_id,),
+                    daemon=True
+                ).start()
+    except Exception as e:
+        _log.error(f"Erro ao verificar detalhes do deputado {deputado_id}: {e}")
+    finally:
+        if conn:
+            db.release_db_connection(conn)
+
+
+def _download_and_import_detalhes(deputado_id: int):
+    """
+    Baixa os detalhes de um deputado e importa para o banco.
+    Executado em thread separada.
+    """
+    try:
+        _log.info(f"Download prioritário: detalhes do deputado {deputado_id}")
+        fetch_detalhes_deputado(deputado_id)
+        
+        # Importa para o banco (apenas este deputado)
+        conn = db.get_db_connection()
+        if conn:
+            try:
+                import_detalhes_deputados(conn, deputado_id=deputado_id)
+            finally:
+                db.release_db_connection(conn)
+        
+        _log.info(f"Download e importação de detalhes concluídos para deputado {deputado_id}")
+    except Exception as e:
+        _log.error(f"Erro no download prioritário de detalhes do deputado {deputado_id}: {e}")
+    finally:
+        with _camara_download_lock:
+            _detalhes_downloading.discard(deputado_id)
 
 
 def _ensure_emendas_deputado(deputado_id: int, nome_deputado: str):
@@ -82,6 +217,11 @@ def _ensure_emendas_deputado(deputado_id: int, nome_deputado: str):
     Verifica se existem emendas no banco para o deputado.
     Se não houver, dispara o download prioritário em background.
     """
+    with _camara_download_lock:
+        if deputado_id in _emendas_downloading:
+            return
+        _emendas_downloading.add(deputado_id)
+    
     conn = None
     try:
         conn = db.get_db_connection()
@@ -101,14 +241,14 @@ def _ensure_emendas_deputado(deputado_id: int, nome_deputado: str):
             count = cursor.fetchone()[0]
             
             if count == 0:
-                logging.info(f"Sem emendas no banco para deputado {deputado_id} ({nome_deputado}). Disparando download prioritário...")
+                _log.info(f"Sem emendas no banco para deputado {deputado_id} ({nome_deputado}). Disparando download prioritário...")
                 threading.Thread(
                     target=_download_and_import_emendas_deputado,
                     args=(deputado_id, nome_deputado),
                     daemon=True
                 ).start()
     except Exception as e:
-        logging.error(f"Erro ao verificar emendas do deputado {deputado_id}: {e}")
+        _log.error(f"Erro ao verificar emendas do deputado {deputado_id}: {e}")
     finally:
         if conn:
             db.release_db_connection(conn)
@@ -120,7 +260,7 @@ def _download_and_import_emendas_deputado(deputado_id: int, nome_deputado: str):
     Executado em thread separada.
     """
     try:
-        logging.info(f"Download prioritário: emendas do deputado {deputado_id} ({nome_deputado})")
+        _log.info(f"Download prioritário: emendas do deputado {deputado_id} ({nome_deputado})")
         
         # Busca todas as páginas de emendas para este deputado
         pagina = 1
@@ -133,22 +273,26 @@ def _download_and_import_emendas_deputado(deputado_id: int, nome_deputado: str):
             if pagina > 50:
                 break
         
-        # Importa para o banco
+        # Importa para o banco (apenas emendas deste parlamentar)
         from scripts.import_data import import_emendas
         if import_emendas is not None:
             conn = db.get_db_connection()
             if conn:
                 try:
-                    import_emendas(conn)
-                    logging.info(f"Download e importação de emendas concluídos para deputado {deputado_id}")
+                    import_emendas(conn, arquivo=nome_deputado)
+                    _log.info(f"Download e importação de emendas concluídos para deputado {deputado_id}")
                 finally:
                     db.release_db_connection(conn)
+
     except Exception as e:
-        logging.error(f"Erro no download prioritário de emendas do deputado {deputado_id}: {e}")
+        _log.error(f"Erro no download prioritário de emendas do deputado {deputado_id}: {e}")
+    finally:
+        with _camara_download_lock:
+            _emendas_downloading.discard(deputado_id)
 
 
 @router.get("/legislaturas", summary="Lista todas as legislaturas disponíveis na base")
-@lru_cache(maxsize=1)
+@ttl_cache(maxsize=1, ttl=3600, cache_name="camara_legislaturas")
 def get_legislaturas_camara():
     conn = None
     try:
@@ -163,16 +307,19 @@ def get_legislaturas_camara():
                 ORDER BY legislatura_id DESC
             """
             cursor.execute(query)
-            return [row[0] for row in cursor.fetchall()]
+            todas = [row[0] for row in cursor.fetchall()]
+            # Filtra apenas legislaturas até a atual (não mostrar futuras)
+            legislatura_atual = get_legislatura_atual()
+            return [leg for leg in todas if leg <= legislatura_atual]
     except Exception as e:
-        logging.error(f"Erro ao buscar legislaturas ativas camara: {e}")
+        _log.error(f"Erro ao buscar legislaturas ativas camara: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar legislaturas")
     finally:
         if conn:
             db.release_db_connection(conn)
 
 @router.get("/maior-legislatura", summary="Retorna a maior legislatura disponível na base")
-@lru_cache(maxsize=1)
+@ttl_cache(maxsize=1, ttl=3600, cache_name="camara_maior_legislatura")
 def get_maior_legislatura_camara_endpoint():
     conn = None
     try:
@@ -186,7 +333,7 @@ def get_maior_legislatura_camara_endpoint():
         
         return {"maior_legislatura": maior_leg, "db_vazio": False}
     except Exception as e:
-        logging.error(f"Erro ao buscar maior legislatura: {e}")
+        _log.error(f"Erro ao buscar maior legislatura: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar maior legislatura")
     finally:
         if conn:
@@ -322,14 +469,14 @@ def get_lista_emendas(
                 }
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar emendas: {e}")
+        _log.error(f"Erro ao buscar emendas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar emendas")
     finally:
         if conn:
             db.release_db_connection(conn)
 
 @router.get("/{legislatura}/emendas/resumo", summary="Obtém resumo das emendas")
-@lru_cache(maxsize=32)
+@ttl_cache(maxsize=16, ttl=300, cache_name="camara_emendas_resumo")
 def get_resumo_emendas(legislatura: int):
     conn = None
     try:
@@ -347,11 +494,11 @@ def get_resumo_emendas(legislatura: int):
                 leg_join = ""
                 start_year = 2023 - (57 - legislatura) * 4
                 end_year = start_year + 3
-                leg_where = "WHERE CAST(e.ano AS INTEGER) BETWEEN %s AND %s AND EXISTS (SELECT 1 FROM camara.deputados_mandatos m WHERE m.deputado_id = p.id AND CAST(e.ano AS INTEGER) BETWEEN 2023 - (57 - m.legislatura_id) * 4 AND 2023 - (57 - m.legislatura_id) * 4 + 3)"
+                leg_where = "WHERE CAST(e.ano AS INTEGER) BETWEEN %s AND %s"
                 leg_params = [start_year, end_year]
             else:
                 leg_join = ""
-                leg_where = "WHERE EXISTS (SELECT 1 FROM camara.deputados_mandatos m WHERE m.deputado_id = p.id AND CAST(e.ano AS INTEGER) BETWEEN 2023 - (57 - m.legislatura_id) * 4 AND 2023 - (57 - m.legislatura_id) * 4 + 3)"
+                leg_where = ""
                 leg_params = []
             
             # 1. Totais Gerais
@@ -464,7 +611,7 @@ def get_resumo_emendas(legislatura: int):
                 ]
             }
     except Exception as e:
-        logging.error(f"Erro ao obter resumo de emendas: {e}")
+        _log.error(f"Erro ao obter resumo de emendas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar resumo de emendas")
     finally:
         if conn:
@@ -554,7 +701,26 @@ def get_lista_proposicoes(
                     p.numero,
                     p.ano,
                     p.ementa,
-                    p.data_apresentacao as "dataApresentacao"
+                    p.data_apresentacao as "dataApresentacao",
+                    COALESCE(
+                        (SELECT d.nome_civil 
+                         FROM camara.proposicoes_autores pa 
+                         JOIN camara.deputados d ON pa.deputado_id = d.id 
+                         WHERE pa.proposicao_id = p.id AND pa.proponente = TRUE 
+                         LIMIT 1),
+                        (SELECT d.nome_civil 
+                         FROM camara.proposicoes_autores pa 
+                         JOIN camara.deputados d ON pa.deputado_id = d.id 
+                         WHERE pa.proposicao_id = p.id 
+                         ORDER BY pa.ordem_assinatura NULLS LAST 
+                         LIMIT 1),
+                        'Desconhecido'
+                    ) as autor_principal,
+                    p.descricao_tipo,
+                    p.ementa_detalhada,
+                    p.keywords,
+                    p.url_inteiro_teor,
+                    p.uri
                 {from_clause}
                 {where_clause}
                 ORDER BY p.id DESC
@@ -573,7 +739,12 @@ def get_lista_proposicoes(
                         "ano": r[3],
                         "ementa": r[4],
                         "dataApresentacao": r[5].isoformat() if hasattr(r[5], 'isoformat') else str(r[5]) if r[5] else None,
-                        "autor_principal": "Desconhecido"
+                        "autor_principal": r[6],
+                        "descricaoTipo": r[7],
+                        "ementaDetalhada": r[8],
+                        "keywords": r[9],
+                        "urlInteiroTeor": r[10],
+                        "uri": r[11]
                     }
                     for r in res
                 ],
@@ -591,7 +762,7 @@ def get_lista_proposicoes(
                 }
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar proposições: {e}")
+        _log.error(f"Erro ao buscar proposições: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar proposições")
     finally:
         if conn:
@@ -655,15 +826,17 @@ def get_votos_proposicao(legislatura: int, proposicao_id: int):
                 "historico_votacoes": list(votacoes_dict.values())
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar votos: {e}")
+        _log.error(f"Erro ao buscar votos: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar votos")
     finally:
         if conn:
             db.release_db_connection(conn)
 
 @router.get("/{legislatura}/lista", summary="Lista todos os deputados ativos")
-@lru_cache(maxsize=16)
-def get_todos_deputados(legislatura: int):
+def get_todos_deputados(
+    legislatura: int,
+    incluir_suplentes: bool = Query(False, description="Se true, inclui suplentes na listagem")
+):
     conn = None
     try:
         conn = db.get_db_connection()
@@ -685,6 +858,11 @@ def get_todos_deputados(legislatura: int):
             if legislatura:
                 query += " AND m.legislatura_id = %s"
                 params.append(legislatura)
+            
+            # Por padrão, filtra apenas deputados em exercício (situacao = 'Exercício')
+            # A menos que incluir_suplentes seja True
+            if not incluir_suplentes:
+                query += " AND m.situacao = 'Exercício'"
                 
             query += " ORDER BY d.id, m.id DESC"
             cursor.execute(query, tuple(params))
@@ -700,15 +878,18 @@ def get_todos_deputados(legislatura: int):
                 for r in res
             ]
     except Exception as e:
-        logging.error(f"Erro ao buscar lista de deputados: {e}")
+        _log.error(f"Erro ao buscar lista de deputados: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar lista de deputados")
     finally:
         if conn:
             db.release_db_connection(conn)
 
 @router.get("/{legislatura}/estatisticas", summary="Obtém estatísticas gerais dos deputados")
-@lru_cache(maxsize=8)
-def get_estatisticas_gerais(legislatura: int):
+@ttl_cache(maxsize=16, ttl=300, cache_name="camara_estatisticas")
+def get_estatisticas_gerais(
+    legislatura: int,
+    incluir_suplentes: bool = Query(False, description="Se true, inclui suplentes nas estatísticas")
+):
     conn = None
     try:
         conn = db.get_db_connection()
@@ -716,12 +897,18 @@ def get_estatisticas_gerais(legislatura: int):
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
+            # Filtro base: por padrão, apenas deputados em exercício
+            condicao_filter = "" if incluir_suplentes else " AND m.situacao = 'Exercício'"
+            
             # 1. Total de Deputados
-            query_total = "SELECT COUNT(DISTINCT deputado_id) as total from camara.deputados_mandatos"
+            query_total = "SELECT COUNT(DISTINCT deputado_id) as total from camara.deputados_mandatos m"
             params = []
             if legislatura:
-                query_total += " WHERE legislatura_id = %s"
+                query_total += " WHERE m.legislatura_id = %s" + condicao_filter
                 params.append(legislatura)
+            else:
+                if condicao_filter:
+                    query_total += " WHERE 1=1" + condicao_filter
             
             cursor.execute(query_total, tuple(params))
             total_deputados = cursor.fetchone()[0] or 0
@@ -744,6 +931,7 @@ def get_estatisticas_gerais(legislatura: int):
             if legislatura:
                 query_regiao += " AND m.legislatura_id = %s"
             
+            query_regiao += condicao_filter
             query_regiao += " GROUP BY regiao ORDER BY quantidade DESC"
             
             cursor.execute(query_regiao, (legislatura,) if legislatura else ())
@@ -759,6 +947,8 @@ def get_estatisticas_gerais(legislatura: int):
             if legislatura:
                 query_ufs += " AND m.legislatura_id = %s"
                 params_ufs.append(legislatura)
+            
+            query_ufs += condicao_filter
 
             cursor.execute(query_ufs, tuple(params_ufs))
             total_ufs = cursor.fetchone()[0] or 0
@@ -770,7 +960,7 @@ def get_estatisticas_gerais(legislatura: int):
                 "deputados_por_regiao": deputados_regiao
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar estatísticas gerais: {e}")
+        _log.error(f"Erro ao buscar estatísticas gerais: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas")
     finally:
         if conn:
@@ -893,7 +1083,7 @@ def get_comparativo_deputados(legislatura: int, id1: int, id2: int, ano: int = N
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Erro ao comparar deputados: {e}")
+        _log.error(f"Erro ao comparar deputados: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar comparação")
     finally:
         if conn:
@@ -968,11 +1158,6 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
                 FROM portal.emendas e
                 JOIN parlamentares_nomes p ON lower(e.autor) = p.nome
                 WHERE p.id = %s
-                  AND EXISTS (
-                      SELECT 1 FROM camara.deputados_mandatos m 
-                      WHERE m.deputado_id = p.id 
-                      AND CAST(e.ano AS INTEGER) BETWEEN 2023 - (57 - m.legislatura_id) * 4 AND 2023 - (57 - m.legislatura_id) * 4 + 3
-                  )
             """
             params_emendas = [deputado_id]
             if legislatura:
@@ -995,7 +1180,10 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
             cursor.execute(query_legis, (deputado_id,))
             legislaturas_ativas = [row[0] for row in cursor.fetchall()]
 
-            # 6. Dispara download de emendas em background se não houver dados
+            # 6. Dispara download de detalhes (situacao/condicao_eleitoral) se estiverem NULL
+            _ensure_detalhes_deputado(deputado_id)
+
+            # 7. Dispara download de emendas em background se não houver dados
             if total_emendas == 0:
                 # Busca o nome do deputado para a busca de emendas
                 nome_deputado = res.get("nome_civil", "")
@@ -1011,7 +1199,7 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Erro ao buscar perfil do deputado: {e}")
+        _log.error(f"Erro ao buscar perfil do deputado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar perfil")
     finally:
         if conn:
@@ -1036,8 +1224,27 @@ def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Quer
             )
             count_despesas = cursor.fetchone()[0]
             if count_despesas == 0:
-                # Dispara download prioritário em background
+                # Dispara download prioritário em background (já inclui emendas)
                 _ensure_despesas_deputado(deputado_id)
+            
+            # Também verifica emendas e dispara download se necessário
+            cursor.execute("""
+                SELECT COUNT(*) FROM portal.emendas e
+                JOIN (
+                    SELECT id, lower(nome_civil) as nome FROM camara.deputados
+                    UNION
+                    SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
+                ) d ON lower(e.autor) = d.nome
+                WHERE d.id = %s
+            """, (deputado_id,))
+            count_emendas = cursor.fetchone()[0]
+            if count_emendas == 0:
+                # Busca o nome do deputado para disparar download de emendas
+                cursor.execute("SELECT nome_civil FROM camara.deputados WHERE id = %s", (deputado_id,))
+                nome_row = cursor.fetchone()
+                if nome_row and nome_row[0]:
+                    _ensure_emendas_deputado(deputado_id, nome_row[0])
+
 
             query_count = """
                 SELECT COUNT(*)
@@ -1110,7 +1317,7 @@ def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Quer
                 }
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar despesas do deputado: {e}")
+        _log.error(f"Erro ao buscar despesas do deputado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar despesas")
     finally:
         if conn:
@@ -1135,11 +1342,6 @@ def get_emendas_deputado(legislatura: int, deputado_id: int, pagina: int = Query
                     SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
                 ) d ON lower(e.autor) = d.nome
                 WHERE d.id = %s
-                  AND EXISTS (
-                      SELECT 1 FROM camara.deputados_mandatos m
-                      WHERE m.deputado_id = d.id
-                      AND CAST(e.ano AS INTEGER) BETWEEN 2023 - (57 - m.legislatura_id) * 4 AND 2023 - (57 - m.legislatura_id) * 4 + 3
-                  )
             """
             params_base = [deputado_id]
             if legislatura:
@@ -1188,14 +1390,14 @@ def get_emendas_deputado(legislatura: int, deputado_id: int, pagina: int = Query
                 }
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar emendas do deputado: {e}")
+        _log.error(f"Erro ao buscar emendas do deputado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar emendas")
     finally:
         if conn:
             db.release_db_connection(conn)
 
 @router.get("/{legislatura}/despesas/estatisticas", summary="Obtém o panorama geral de gastos da Câmara")
-@lru_cache(maxsize=4)
+@ttl_cache(maxsize=16, ttl=300, cache_name="camara_despesas_estatisticas")
 def get_estatisticas_despesas(legislatura: int):
     conn = None
     try:
@@ -1366,7 +1568,7 @@ def get_estatisticas_despesas(legislatura: int):
                 "gastos_deputados": gastos_deputados
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar estatísticas de despesas: {e}")
+        _log.error(f"Erro ao buscar estatísticas de despesas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas de despesas")
     finally:
         if conn:
@@ -1458,7 +1660,7 @@ def get_estatisticas_empresas(legislatura: int, limit: int = 20):
                 "ranking": ranking_formatado
             }
     except Exception as e:
-        logging.error(f"Erro ao buscar estatísticas de empresas: {e}")
+        _log.error(f"Erro ao buscar estatísticas de empresas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas de empresas")
     finally:
         if conn:
@@ -1479,34 +1681,37 @@ def get_resumo_principal_camara(legislatura: int = 0):
         if not conn:
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
-        with conn.cursor() as cursor:
-            # Se legislatura não foi informada, busca a maior disponível
-            if not legislatura or legislatura <= 0:
+        # Se legislatura não foi informada, busca a maior disponível
+        if not legislatura or legislatura <= 0:
+            with conn.cursor() as cursor:
                 maior_leg = get_maior_legislatura_camara(conn)
-                if maior_leg is None:
-                    # Tenta importar dados dos JSONs baixados pelo scraper
-                    logging.info("Banco vazio detectado. Tentando importar dados dos arquivos JSON...")
-                    try:
-                        import_all_data(conn)
-                        logging.info("Importação concluída. Refazendo consulta...")
-                    except Exception as import_err:
-                        logging.error(f"Erro ao importar dados: {import_err}")
-
-                    # Refaz a consulta após a importação
-                    maior_leg = get_maior_legislatura_camara(conn)
-                    if maior_leg is None:
-                        return {
-                            "total_parlamentares": 0,
-                            "gastos_12_meses": 0.0,
-                            "db_vazio": True
-                        }
-                legislatura = maior_leg
             
-            # 1. Total de deputados
-            query_total = "SELECT COUNT(DISTINCT deputado_id) FROM camara.deputados_mandatos"
+            if maior_leg is None:
+                # Tenta importar dados dos JSONs baixados pelo scraper
+                _log.info("Banco vazio detectado. Tentando importar dados dos arquivos JSON...")
+                try:
+                    import_all_data(conn)
+                    _log.info("Importação concluída. Refazendo consulta...")
+                except Exception as import_err:
+                    _log.error(f"Erro ao importar dados: {import_err}")
+                
+                with conn.cursor() as cursor:
+                    maior_leg = get_maior_legislatura_camara(conn)
+            
+            if maior_leg is None:
+                return {
+                    "total_parlamentares": 0,
+                    "gastos_12_meses": 0.0,
+                    "db_vazio": True
+                }
+            legislatura = maior_leg
+        
+        with conn.cursor() as cursor:
+            # 1. Total de deputados (apenas em exercício)
+            query_total = "SELECT COUNT(DISTINCT deputado_id) FROM camara.deputados_mandatos WHERE situacao = 'Exercício'"
             params_total = []
             if legislatura and legislatura > 0:
-                query_total += " WHERE legislatura_id = %s"
+                query_total += " AND legislatura_id = %s"
                 params_total.append(legislatura)
             
             cursor.execute(query_total, tuple(params_total))
@@ -1539,21 +1744,28 @@ def get_resumo_principal_camara(legislatura: int = 0):
 
             # Se tem deputados mas não tem gastos, dispara download prioritário em background
             if not db_vazio and gastos_12_meses == 0:
-                logging.info("Resumo: deputados encontrados mas sem despesas. Disparando download prioritário...")
-                threading.Thread(
-                    target=fetch_despesas_todas_camara,
-                    daemon=True
-                ).start()
+                _log.info("Resumo: deputados encontrados mas sem despesas. Disparando download prioritário...")
+                global _camara_download_in_progress
+                with _camara_download_lock:
+                    if not _camara_download_in_progress:
+                        _camara_download_in_progress = True
+                        threading.Thread(
+                            target=_download_and_import_camara_todas,
+                            daemon=True
+                        ).start()
 
             return {
                 "total_parlamentares": total_deputados,
                 "gastos_12_meses": gastos_12_meses,
                 "db_vazio": db_vazio
             }
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Erro no resumo principal da Câmara: {e}")
+        _log.error(f"Erro no resumo principal da Câmara: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar resumo")
     finally:
         if conn:
             db.release_db_connection(conn)
+
 

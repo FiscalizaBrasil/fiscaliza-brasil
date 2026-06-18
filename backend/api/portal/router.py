@@ -2,7 +2,7 @@
 Router para dados do Portal da Transparência (emendas parlamentares).
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from database import db
 import logging
 
@@ -27,6 +27,8 @@ def get_emendas(
     conn = None
     try:
         conn = db.get_db_connection()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         with conn.cursor() as cursor:
             where_clauses = []
             params = []
@@ -81,7 +83,7 @@ def get_emendas(
             }
     except Exception as e:
         logger.error(f"Erro ao buscar emendas: {e}")
-        return {"total": 0, "limit": limit, "offset": offset, "emendas": []}
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             db.release_db_connection(conn)
@@ -95,6 +97,8 @@ def get_emendas_resumo():
     conn = None
     try:
         conn = db.get_db_connection()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         with conn.cursor() as cursor:
             # Total por ano
             cursor.execute("""
@@ -137,7 +141,7 @@ def get_emendas_resumo():
             }
     except Exception as e:
         logger.error(f"Erro ao buscar resumo de emendas: {e}")
-        return {"total_geral": {}, "por_ano": [], "por_tipo": []}
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             db.release_db_connection(conn)

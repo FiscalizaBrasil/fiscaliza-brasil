@@ -171,7 +171,7 @@ const totalUfs = computed(() => {
 const gastosUltimosMeses = computed(() => {
   if (!store.generalStats?.gastos_por_mes) return []
 
-  const ultimos = [...store.generalStats.gastos_por_mes].reverse().slice(0, 5).reverse()
+  const ultimos = store.generalStats.gastos_por_mes.slice(0, 5)
   const maxValor = Math.max(...ultimos.map(m => m.valor), 1)
 
   return ultimos.map((m, i) => ({

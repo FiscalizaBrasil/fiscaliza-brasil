@@ -17,7 +17,11 @@ export interface ProjetoLegislativo {
   ementa: string
   dataApresentacao: string | null
   autor_principal: string
-  url_inteiro_teor?: string | null
+  descricaoTipo?: string | null
+  ementaDetalhada?: string | null
+  keywords?: string | null
+  urlInteiroTeor?: string | null
+  uri?: string | null
 }
 
 export interface DeputadoDetail {
@@ -179,6 +183,7 @@ export const useCamaraStore = defineStore("camara", () => {
   const error = ref<string | null>(null)
   const currentPage = ref(1)
   const itemsPerPage = 12
+  const incluirSuplentes = ref(false)
 
   // Detail state
   const currentDeputado = ref<DeputadoDetail | null>(null)
@@ -192,6 +197,8 @@ export const useCamaraStore = defineStore("camara", () => {
   const emendasPage = ref(1)
   const emendasTotalPages = ref(1)
   const loadingDetail = ref(false)
+  const loadingDespesas = ref(false)
+  const loadingEmendas = ref(false)
 
   // General Stats state
   const generalStats = ref<EstatisticasGerais | null>(null)
@@ -237,7 +244,21 @@ export const useCamaraStore = defineStore("camara", () => {
     
     // Se o scraping já terminou, não precisa de polling
     if (scrapingStatus.value && !scrapingStatus.value.em_andamento) return
+    
+    // Se scrapingStatus ainda é null (não foi buscado), busca agora
+    if (!scrapingStatus.value) {
+      fetchScrapingStatus().then(() => {
+        // Após buscar, verifica novamente se precisa de polling
+        if (scrapingStatus.value && !scrapingStatus.value.em_andamento) return
+        iniciarPollingComTimer(id)
+      })
+      return
+    }
 
+    iniciarPollingComTimer(id)
+  }
+
+  const iniciarPollingComTimer = (id: number) => {
     pararPolling()
     pollingTimer = setInterval(async () => {
       // Atualiza status do scraping
@@ -277,7 +298,8 @@ export const useCamaraStore = defineStore("camara", () => {
     loading.value = true
     error.value = null
     try {
-      const response = await fetch(`${apiUrl}/api/camara/${legislatura.value}/lista`)
+      const url = `${apiUrl}/api/camara/${legislatura.value}/lista?incluir_suplentes=${incluirSuplentes.value}`
+      const response = await fetch(url)
       if (!response.ok) throw new Error("Falha ao buscar deputados")
 
       const data = await response.json()
@@ -390,6 +412,11 @@ export const useCamaraStore = defineStore("camara", () => {
         ementa: p.ementa,
         dataApresentacao: p.dataApresentacao,
         autor_principal: p.autor_principal || "Desconhecido",
+        descricaoTipo: p.descricaoTipo || null,
+        ementaDetalhada: p.ementaDetalhada || null,
+        keywords: p.keywords || null,
+        urlInteiroTeor: p.urlInteiroTeor || null,
+        uri: p.uri || null,
       }))
 
       if (pagina === 1) {
@@ -445,6 +472,7 @@ export const useCamaraStore = defineStore("camara", () => {
   }
 
   const fetchEmendasDeputado = async (id: number, page: number = 1) => {
+    loadingEmendas.value = true
     try {
       const response = await fetch(`${apiUrl}/api/camara/${legislatura.value}/${id}/emendas?pagina=${page}`)
       if (!response.ok) throw new Error("Falha ao buscar emendas")
@@ -454,11 +482,13 @@ export const useCamaraStore = defineStore("camara", () => {
       emendasTotalPages.value = data.paginacao?.total_paginas || 1
     } catch (e: any) {
       console.error("Erro ao buscar emendas do deputado:", e)
+    } finally {
+      loadingEmendas.value = false
     }
   }
 
   const fetchDespesasDeputado = async (id: number, page: number = 1) => {
-    loadingDetail.value = true
+    loadingDespesas.value = true
     try {
       const response = await fetch(`${apiUrl}/api/camara/${legislatura.value}/${id}/despesas?pagina=${page}`)
       if (!response.ok) throw new Error("Falha ao buscar despesas do deputado")
@@ -469,7 +499,7 @@ export const useCamaraStore = defineStore("camara", () => {
       despesasPage.value = data.paginacao?.pagina || 1
       despesasTotalPages.value = data.paginacao?.total_paginas || 1
     } finally {
-      loadingDetail.value = false
+      loadingDespesas.value = false
     }
   }
 
@@ -554,6 +584,12 @@ export const useCamaraStore = defineStore("camara", () => {
     currentPage.value = 1
   }
 
+  const toggleIncluirSuplentes = async () => {
+    incluirSuplentes.value = !incluirSuplentes.value
+    await fetchDeputados()
+    await fetchEstatisticasDeputados()
+  }
+
   return {
     filters,
     currentPage,
@@ -576,6 +612,8 @@ export const useCamaraStore = defineStore("camara", () => {
     emendasPage,
     emendasTotalPages,
     loadingDetail,
+    loadingDespesas,
+    loadingEmendas,
     generalStats,
     deputadoStats,
     loadingStats,
@@ -616,5 +654,7 @@ export const useCamaraStore = defineStore("camara", () => {
     fetchScrapingStatus,
     iniciarPollingDeputado,
     pararPolling,
+    incluirSuplentes,
+    toggleIncluirSuplentes,
   }
 })
