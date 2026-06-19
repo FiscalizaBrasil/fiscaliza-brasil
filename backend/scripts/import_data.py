@@ -539,14 +539,17 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                         _despesas_camara_importadas.add(dep_id)
                         continue  # Já importado anteriormente, pula
                     
-                    # Busca o mandato_id para este deputado (qualquer legislatura)
+                    # Pré-busca todos os mandatos do deputado com seu período (ano início)
                     cursor.execute("""
-                        SELECT id FROM camara.deputados_mandatos 
-                        WHERE deputado_id = %s 
-                        ORDER BY legislatura_id DESC LIMIT 1
+                        SELECT m.id, m.legislatura_id, 
+                               CAST(SPLIT_PART(l.data_inicio, '-', 1) AS INTEGER) as ano_inicio
+                        FROM camara.deputados_mandatos m
+                        JOIN camara.legislaturas l ON m.legislatura_id = l.id
+                        WHERE m.deputado_id = %s
                     """, (dep_id,))
-                    mandato_row = cursor.fetchone()
-                    if not mandato_row:
+                    mandatos_info = cursor.fetchall()
+                    
+                    if not mandatos_info:
                         # Tenta cadastrar o deputado dinamicamente a partir do JSON já carregado
                         dep_info = deputados_por_id.get(dep_id)
                         if dep_info:
@@ -577,6 +580,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                                 # Busca situação e condição eleitoral na API (com cache)
                                 situacao, condicao_eleitoral = _buscar_situacao_deputado(dep_id)
                                 mandato_id = f"{dep_id}_{id_legislatura}"
+                                ano_inicio = (id_legislatura - 49) * 4 + 1991
                                 cursor.execute("""
                                     INSERT INTO camara.deputados_mandatos
                                         (id, deputado_id, legislatura_id, nome_eleitoral,
@@ -589,7 +593,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                                       situacao, condicao_eleitoral))
                                 conn.commit()
                                 logging.info(f"Deputado {dep_id} ({nome}) cadastrado dinamicamente a partir do JSON.")
-                                mandato_row = (mandato_id,)
+                                mandatos_info = [(mandato_id, id_legislatura, ano_inicio)]
                             else:
                                 logging.warning(f"Deputado {dep_id} encontrado no JSON mas sem idLegislatura. Pulando.")
                                 continue
@@ -597,12 +601,29 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                             logging.warning(f"Mandato não encontrado para deputado {dep_id} e deputado não consta no JSON. Pulando.")
                             erro_mandato = True
                             continue
-                    mandato_id = mandato_row[0]
+                    
+                    # Mapeia ano -> mandato_id (cada mandato cobre 4 anos a partir do ano_inicio)
+                    mandato_por_ano = {}
+                    for m_id, leg_id, ano_ini in mandatos_info:
+                        for y in range(ano_ini, ano_ini + 4):
+                            if y not in mandato_por_ano:
+                                mandato_por_ano[y] = m_id
+                    
+                    # Fallback: mandato mais recente
+                    mandato_fallback = mandatos_info[0][0]
                     
                     # Percorre os arquivos JSON de cada ano/página
                     for fname in sorted(os.listdir(dep_dir)):
                         if not fname.endswith(".json"):
                             continue
+                        
+                        # Extrai o ano do nome do arquivo (ex: "2023_pagina1.json" -> 2023)
+                        try:
+                            ano_arquivo = int(fname.split('_')[0])
+                        except (ValueError, IndexError):
+                            ano_arquivo = None
+                        
+                        mandato_id = mandato_por_ano.get(ano_arquivo, mandato_fallback)
                         
                         filepath = os.path.join(dep_dir, fname)
                         with open(filepath, "r", encoding="utf-8") as f:

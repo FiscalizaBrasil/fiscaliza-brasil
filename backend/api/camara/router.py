@@ -1406,6 +1406,11 @@ def get_estatisticas_despesas(legislatura: int):
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
+            # Período da legislatura para filtrar despesas por ano
+            if legislatura:
+                start_year = 2023 - (57 - legislatura) * 4
+                end_year = start_year + 3
+
             # 1. Gastos por Categoria
             query_cat = """
                 SELECT d.tipo_despesa as categoria, SUM(d.valor_documento) as valor
@@ -1415,8 +1420,8 @@ def get_estatisticas_despesas(legislatura: int):
             """
             params = []
             if legislatura:
-                query_cat += " AND m.legislatura_id = %s"
-                params.append(legislatura)
+                query_cat += " AND m.legislatura_id = %s AND d.ano BETWEEN %s AND %s"
+                params.extend([legislatura, start_year, end_year])
             
             query_cat += " GROUP BY d.tipo_despesa ORDER BY valor DESC"
             cursor.execute(query_cat, tuple(params))
@@ -1447,8 +1452,8 @@ def get_estatisticas_despesas(legislatura: int):
             """
             params_mensal = []
             if legislatura:
-                query_mensal += " AND m.legislatura_id = %s"
-                params_mensal.append(legislatura)
+                query_mensal += " AND m.legislatura_id = %s AND d.ano BETWEEN %s AND %s"
+                params_mensal.extend([legislatura, start_year, end_year])
                 
             query_mensal += " GROUP BY d.ano, d.mes ORDER BY d.ano DESC, d.mes DESC LIMIT 12"
             cursor.execute(query_mensal, tuple(params_mensal))
@@ -1463,8 +1468,8 @@ def get_estatisticas_despesas(legislatura: int):
             """
             params_est = []
             if legislatura:
-                query_estado += " AND m.legislatura_id = %s"
-                params_est.append(legislatura)
+                query_estado += " AND m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s"
+                params_est.extend([legislatura, start_year, end_year])
             
             query_estado += " GROUP BY m.sigla_uf ORDER BY valor DESC"
             cursor.execute(query_estado, tuple(params_est))
@@ -1479,19 +1484,29 @@ def get_estatisticas_despesas(legislatura: int):
             """
             params_part = []
             if legislatura:
-                query_partido += " AND m.legislatura_id = %s"
-                params_part.append(legislatura)
+                query_partido += " AND m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s"
+                params_part.extend([legislatura, start_year, end_year])
                 
             query_partido += " GROUP BY m.sigla_partido ORDER BY valor DESC"
             cursor.execute(query_partido, tuple(params_part))
             gastos_partido = [{"partido": r[0], "valor": float(r[1])} for r in cursor.fetchall()]
 
             # 5. Totais
-            cursor.execute("""
-                SELECT SUM(valor_documento)
-                FROM camara.deputados_despesas
-                WHERE TO_DATE(CAST(ano AS TEXT) || '-' || CAST(mes AS TEXT), 'YYYY-MM') >= (CURRENT_DATE - INTERVAL '1 year')
-            """)
+            if legislatura:
+                cursor.execute("""
+                    SELECT SUM(d.valor_documento)
+                    FROM camara.deputados_despesas d
+                    JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
+                    WHERE m.legislatura_id = %s
+                      AND d.ano BETWEEN %s AND %s
+                      AND TO_DATE(CAST(d.ano AS TEXT) || '-' || CAST(d.mes AS TEXT), 'YYYY-MM') >= (CURRENT_DATE - INTERVAL '1 year')
+                """, (legislatura, start_year, end_year))
+            else:
+                cursor.execute("""
+                    SELECT SUM(valor_documento)
+                    FROM camara.deputados_despesas
+                    WHERE TO_DATE(CAST(ano AS TEXT) || '-' || CAST(mes AS TEXT), 'YYYY-MM') >= (CURRENT_DATE - INTERVAL '1 year')
+                """)
             total_12_row = cursor.fetchone()
             total_12_meses = total_12_row[0] or 0
 
@@ -1502,9 +1517,9 @@ def get_estatisticas_despesas(legislatura: int):
                     SELECT SUM(desp.valor_documento)
                     FROM camara.deputados_despesas desp
                     JOIN camara.deputados_mandatos m ON desp.mandato_id = m.id
-                    WHERE m.legislatura_id = %s
+                    WHERE m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s
                 """
-                params_total.append(legislatura)
+                params_total.extend([legislatura, start_year, end_year])
             
             cursor.execute(query_total_geral, tuple(params_total))
             total_geral = cursor.fetchone()[0] or 0
@@ -1516,9 +1531,9 @@ def get_estatisticas_despesas(legislatura: int):
                     SELECT COUNT(DISTINCT UPPER(TRIM(REGEXP_REPLACE(desp.nome_fornecedor, '\\s+(S/A|S\\.A\\.|SA|LTDA|EIRELI|ME|EPP|EI|LIMITADA).*$', '', 'gi'))))
                     FROM camara.deputados_despesas desp
                     JOIN camara.deputados_mandatos m ON desp.mandato_id = m.id
-                    WHERE m.legislatura_id = %s AND LENGTH(REGEXP_REPLACE(desp.cnpj_cpf_fornecedor, '[^0-9]', '', 'g')) > 11
+                    WHERE m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s AND LENGTH(REGEXP_REPLACE(desp.cnpj_cpf_fornecedor, '[^0-9]', '', 'g')) > 11
                 """
-                params_forn.append(legislatura)
+                params_forn.extend([legislatura, start_year, end_year])
                 
             cursor.execute(query_total_fornecedores, tuple(params_forn))
             total_empresas = cursor.fetchone()[0] or 0
@@ -1537,8 +1552,8 @@ def get_estatisticas_despesas(legislatura: int):
             """
             params_dep = []
             if legislatura:
-                query_gastos_dep += " AND m.legislatura_id = %s"
-                params_dep.append(legislatura)
+                query_gastos_dep += " AND m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s"
+                params_dep.extend([legislatura, start_year, end_year])
             
             query_gastos_dep += """
             GROUP BY d.id, d.nome_civil, m.sigla_partido, m.sigla_uf
