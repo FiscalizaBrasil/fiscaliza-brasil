@@ -859,10 +859,10 @@ def get_todos_deputados(
                 query += " AND m.legislatura_id = %s"
                 params.append(legislatura)
             
-            # Por padrão, filtra apenas deputados em exercício (situacao = 'Exercício')
+            # Por padrão, filtra apenas deputados titulares ou efetivados
             # A menos que incluir_suplentes seja True
             if not incluir_suplentes:
-                query += " AND m.situacao = 'Exercício'"
+                query += " AND m.condicao_eleitoral IN ('Titular', 'Efetivado')"
                 
             query += " ORDER BY d.id, m.id DESC"
             cursor.execute(query, tuple(params))
@@ -897,8 +897,8 @@ def get_estatisticas_gerais(
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
-            # Filtro base: por padrão, apenas deputados em exercício
-            condicao_filter = "" if incluir_suplentes else " AND m.situacao = 'Exercício'"
+            # Filtro base: por padrão, apenas deputados titulares ou efetivados
+            condicao_filter = "" if incluir_suplentes else " AND m.condicao_eleitoral IN ('Titular', 'Efetivado')"
             
             # 1. Total de Deputados
             query_total = "SELECT COUNT(DISTINCT deputado_id) as total from camara.deputados_mandatos m"
@@ -1707,8 +1707,8 @@ def get_resumo_principal_camara(legislatura: int = 0):
             legislatura = maior_leg
         
         with conn.cursor() as cursor:
-            # 1. Total de deputados (apenas em exercício)
-            query_total = "SELECT COUNT(DISTINCT deputado_id) FROM camara.deputados_mandatos WHERE situacao = 'Exercício'"
+            # 1. Total de deputados (titulares e efetivados)
+            query_total = "SELECT COUNT(DISTINCT deputado_id) FROM camara.deputados_mandatos WHERE condicao_eleitoral IN ('Titular', 'Efetivado')"
             params_total = []
             if legislatura and legislatura > 0:
                 query_total += " AND legislatura_id = %s"

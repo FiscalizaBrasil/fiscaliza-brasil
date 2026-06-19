@@ -138,7 +138,7 @@ export const useCamaraStore = defineStore("camara", () => {
     deputado: "",
   })
 
-  const legislatura = ref(57)
+  const legislatura = ref(0)
   const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 
   const legislaturasDisponiveis = ref<number[]>([])
@@ -165,11 +165,6 @@ export const useCamaraStore = defineStore("camara", () => {
       const data = await response.json()
       if (data && data.length > 0) {
         legislaturasDisponiveis.value = data
-        // Define a legislatura padrão como a maior disponível
-        const maior = await fetchMaiorLegislatura()
-        if (maior && legislatura.value !== maior) {
-          legislatura.value = maior
-        }
       }
     } catch (e: any) {
       console.error("Erro ao carregar legislaturas globais:", e)
