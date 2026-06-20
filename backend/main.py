@@ -20,6 +20,8 @@ from database.cache import get_cache_stats, invalidate_cache
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Limpando caches residuais...")
+    invalidate_cache()
     logger.info("Iniciando downloads em background...")
     start_background_fotos()
     start_background_import()

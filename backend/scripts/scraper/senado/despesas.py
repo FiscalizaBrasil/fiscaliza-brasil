@@ -1,11 +1,11 @@
 import os
 import json
-import time
 import logging
 import requests
 
 from ..config import DATA_DIR, ANOS_PADRAO
 from ..cache import is_cache_valid, save_json
+from ..rate_limiter import senado_adm_limiter
 
 _log = logging.getLogger("SENADO")
 
@@ -27,6 +27,7 @@ def fetch_despesas_senado_ano(ano, data_dir=None):
 
     _log.info("Buscando despesas CEAPS para %s...", ano)
     try:
+        senado_adm_limiter.acquire()
         response = requests.get(url, headers=headers, timeout=60)
         response.raise_for_status()
         data = response.json()
@@ -43,4 +44,3 @@ def fetch_despesas_senado_todas(data_dir=None):
 
     for ano in ANOS_PADRAO:
         fetch_despesas_senado_ano(ano, data_dir=data_dir)
-        time.sleep(0.05)

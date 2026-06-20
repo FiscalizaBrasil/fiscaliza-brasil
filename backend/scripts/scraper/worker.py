@@ -192,12 +192,21 @@ def _sanitize_nome(nome):
 
 
 def _load_deputados_dados():
-    json_path = os.path.join(DATA_DIR, "camara", "deputados.json")
-    if not os.path.isfile(json_path):
+    """Carrega dados de todos os arquivos de deputados (todas as legislaturas)."""
+    dados = []
+    camara_dir = os.path.join(DATA_DIR, "camara")
+    if not os.path.isdir(camara_dir):
         return []
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get("dados", [])
+    for fname in sorted(os.listdir(camara_dir)):
+        if fname.startswith("deputados") and fname.endswith(".json"):
+            json_path = os.path.join(camara_dir, fname)
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                dados.extend(data.get("dados", []))
+            except Exception:
+                pass
+    return dados
 
 
 def _load_deputados_ids():
@@ -220,6 +229,12 @@ def _move_matching_files(directory, prefix, failed_subpath_dir):
 # Utility functions – unchanged
 # ===================================================================
 
+def _anos_legislatura(id_legislatura):
+    """Calcula os anos cobertos por uma legislatura."""
+    ano_inicio = 2023 - (57 - id_legislatura) * 4
+    return list(range(ano_inicio, ano_inicio + 4))
+
+
 def _get_deputados_pendentes(data_dir=None):
     if data_dir is None:
         data_dir = os.path.join(DATA_DIR, "camara", "despesas")
@@ -228,11 +243,11 @@ def _get_deputados_pendentes(data_dir=None):
     if not dados:
         return []
 
-    anos = list(ANOS_PADRAO)
     seen = set()
     pendentes = []
 
-    db_missing = set()
+    # Deputados que já têm despesas no banco, por legislatura
+    db_com_legislatura = set()
 
     if db is not None:
         try:
@@ -241,11 +256,12 @@ def _get_deputados_pendentes(data_dir=None):
                 try:
                     with conn.cursor() as cur:
                         cur.execute(
-                            "SELECT dm.deputado_id FROM camara.deputados_despesas dd "
+                            "SELECT dm.deputado_id, dm.legislatura_id "
+                            "FROM camara.deputados_despesas dd "
                             "JOIN camara.deputados_mandatos dm ON dm.id = dd.mandato_id "
-                            "GROUP BY dm.deputado_id"
+                            "GROUP BY dm.deputado_id, dm.legislatura_id"
                         )
-                        db_missing = {row[0] for row in cur.fetchall()}
+                        db_com_legislatura = {(row[0], row[1]) for row in cur.fetchall()}
                 finally:
                     db.release_db_connection(conn)
         except Exception:
@@ -253,27 +269,43 @@ def _get_deputados_pendentes(data_dir=None):
 
     for dep in dados:
         dep_id = dep["id"]
-        if dep_id in seen:
+        id_leg = dep.get("idLegislatura")
+        if not id_leg:
             continue
-        seen.add(dep_id)
 
-        if dep_id in db_missing:
+        chave = (dep_id, id_leg)
+        if chave in seen:
+            continue
+        seen.add(chave)
+
+        # Pula se já tem despesas no banco para esta legislatura
+        if chave in db_com_legislatura:
             continue
 
         dep_dir = os.path.join(data_dir, str(dep_id))
+        leg_dir = os.path.join(dep_dir, str(id_leg))
+        anos = _anos_legislatura(id_leg)
+
         completo = True
         for ano in anos:
             ano_tem_dados = False
-            if os.path.isdir(dep_dir):
-                for fname in os.listdir(dep_dir):
+            if os.path.isdir(leg_dir):
+                for fname in os.listdir(leg_dir):
                     if fname.startswith(f"{ano}_pagina") and fname.endswith(".json"):
                         ano_tem_dados = True
                         break
             if not ano_tem_dados:
                 completo = False
                 break
-        if not completo:
-            pendentes.append(dep)
+
+        if completo:
+            # Arquivos existem, mas verifica se dados estão no banco
+            if chave not in db_com_legislatura:
+                # Arquivos baixados mas não importados -> marcar como pendente para reimportação
+                pendentes.append(dep)
+            continue
+
+        pendentes.append(dep)
 
     return pendentes
 
@@ -364,11 +396,22 @@ def _get_parlamentares_sem_emendas(data_dir=None):
                 nomes_parlamentares.add(nome)
 
     sem_emendas = []
+    ano_atual = datetime.datetime.now().year
+
     for nome in nomes_parlamentares:
         nome_sanitizado = _sanitize_nome(nome)
-        pagina1_path = os.path.join(data_dir, f"{nome_sanitizado}_pagina1.json")
-        if not os.path.isfile(pagina1_path) or not is_cache_valid(pagina1_path):
-            sem_emendas.append(nome)
+
+        # Cache válido no formato novo: {nome}_{ano}_pagina1.json
+        pagina1_path = os.path.join(data_dir, f"{nome_sanitizado}_{ano_atual}_pagina1.json")
+        if os.path.isfile(pagina1_path) and is_cache_valid(pagina1_path):
+            continue
+
+        # Fallback: formato antigo {nome}_pagina1.json
+        pagina1_path_old = os.path.join(data_dir, f"{nome_sanitizado}_pagina1.json")
+        if os.path.isfile(pagina1_path_old) and is_cache_valid(pagina1_path_old):
+            continue
+
+        sem_emendas.append(nome)
 
     return sem_emendas
 
@@ -550,14 +593,16 @@ def _processar_ano_senado(ano):
 
 def _processar_emendas_parlamentar(nome):
     def _fetch():
-        pagina = 1
-        while True:
-            result = fetch_emendas_parlamentar(nome, pagina=pagina)
-            if not result.get("emendas", []):
-                break
-            pagina += 1
-            if pagina > 50:
-                break
+        ano_atual = datetime.datetime.now().year
+        for ano in range(2015, ano_atual + 1):
+            pagina = 1
+            while True:
+                result = fetch_emendas_parlamentar(nome, ano=ano, pagina=pagina)
+                if not result.get("emendas", []):
+                    break
+                pagina += 1
+                if pagina > 50:
+                    break
 
     nome_sanitizado = _sanitize_nome(nome)
     return _processar_com_importacao({

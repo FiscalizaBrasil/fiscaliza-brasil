@@ -10,7 +10,13 @@ from ..fetcher import fetch_paginated
 _log = logging.getLogger("CAMARA")
 
 
-def fetch_despesas_deputado(deputado_id, anos=None, data_dir=None):
+def _anos_legislatura(id_legislatura):
+    """Calcula os anos cobertos por uma legislatura."""
+    ano_inicio = 2023 - (57 - id_legislatura) * 4
+    return list(range(ano_inicio, ano_inicio + 4))
+
+
+def fetch_despesas_deputado(deputado_id, anos=None, id_legislatura=None, data_dir=None):
     if data_dir is None:
         data_dir = os.path.join(DATA_DIR, "camara", "despesas")
 
@@ -27,26 +33,34 @@ def fetch_despesas_deputado(deputado_id, anos=None, data_dir=None):
         url = f"https://dadosabertos.camara.leg.br/api/v2/deputados/{deputado_id}/despesas"
 
         def params_fn(pagina):
-            return {
+            params = {
                 "ano": ano,
                 "itens": 100,
                 "ordem": "ASC",
                 "ordenarPor": "ano",
                 "pagina": pagina,
             }
+            if id_legislatura is not None:
+                params["idLegislatura"] = id_legislatura
+            return params
 
-        def filepath_template(pagina):
-            return os.path.join(dep_dir, f"{ano}_pagina{pagina}.json")
+        if id_legislatura is not None:
+            leg_dir = os.path.join(dep_dir, str(id_legislatura))
+            os.makedirs(leg_dir, exist_ok=True)
+            def filepath_template(pagina):
+                return os.path.join(leg_dir, f"{ano}_pagina{pagina}.json")
+        else:
+            def filepath_template(pagina):
+                return os.path.join(dep_dir, f"{ano}_pagina{pagina}.json")
 
         ano_resultados = fetch_paginated(
             url=url,
             filepath_template=filepath_template,
             params_fn=params_fn,
-            rate_limit=0.05,
             timeout=30,
             headers=headers,
             items_field="dados",
-            log_label="despesas dep=%s ano=%s" % (deputado_id, ano),
+            log_label="despesas dep=%s leg=%s ano=%s" % (deputado_id, id_legislatura or "N/A", ano),
             logger=_log,
         )
         resultados[ano] = ano_resultados
@@ -54,35 +68,50 @@ def fetch_despesas_deputado(deputado_id, anos=None, data_dir=None):
     return resultados
 
 
+def _load_deputados_all():
+    """Carrega dados de todos os arquivos de deputados (todas as legislaturas)."""
+    dados = []
+    camara_dir = os.path.join(DATA_DIR, "camara")
+    if not os.path.isdir(camara_dir):
+        return []
+    for fname in sorted(os.listdir(camara_dir)):
+        if fname.startswith("deputados") and fname.endswith(".json"):
+            json_path = os.path.join(camara_dir, fname)
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                dados.extend(data.get("dados", []))
+            except Exception:
+                pass
+    return dados
+
+
 def fetch_despesas_todas_camara(data_dir=None):
     if data_dir is None:
         data_dir = os.path.join(DATA_DIR, "camara", "despesas")
 
-    json_path = os.path.join(DATA_DIR, "camara", "deputados.json")
-    if not os.path.isfile(json_path):
-        _log.warning("Lista de deputados não encontrada.")
-        return
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    dados = data.get("dados", [])
+    dados = _load_deputados_all()
     if not dados:
         _log.warning("Nenhum deputado na lista.")
         return
 
     random.shuffle(dados)
-    anos = list(ANOS_PADRAO)
 
     for dep in dados:
         dep_id = dep["id"]
+        id_leg = dep.get("idLegislatura")
+        if not id_leg:
+            continue
+
+        anos = _anos_legislatura(id_leg)
         dep_dir = os.path.join(data_dir, str(dep_id))
+        leg_dir = os.path.join(dep_dir, str(id_leg))
 
         completo = True
         for ano in anos:
             ano_tem_dados = False
-            if os.path.isdir(dep_dir):
-                for fname in os.listdir(dep_dir):
+            if os.path.isdir(leg_dir):
+                for fname in os.listdir(leg_dir):
                     if fname.startswith(f"{ano}_pagina") and fname.endswith(".json"):
                         ano_tem_dados = True
                         break
@@ -93,9 +122,9 @@ def fetch_despesas_todas_camara(data_dir=None):
         if completo:
             continue
 
-        _log.info("Baixando despesas do deputado %s (%s)", dep_id, dep.get("nome", ""))
+        _log.info("Baixando despesas do deputado %s (%s) legislatura %s", dep_id, dep.get("nome", ""), id_leg)
         try:
-            fetch_despesas_deputado(dep_id, anos=anos, data_dir=data_dir)
+            fetch_despesas_deputado(dep_id, anos=anos, id_legislatura=id_leg, data_dir=data_dir)
         except Exception as e:
             _log.error("Erro ao baixar despesas do deputado %s: %s", dep_id, e)
             continue

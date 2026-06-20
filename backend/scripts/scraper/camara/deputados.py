@@ -1,11 +1,11 @@
 import os
 import json
-import time
 import logging
 import requests
 
 from ..config import DATA_DIR, CAMARA_API_BASE, LEGISLATURAS
 from ..cache import is_cache_valid, save_json, download_foto
+from ..rate_limiter import camara_limiter
 
 _log = logging.getLogger("CAMARA")
 
@@ -44,6 +44,7 @@ def fetch_deputados_camara(data_dir=None, legislatura=None):
             " (legislatura %s)" % legislatura if legislatura else "",
             pagina,
         )
+        camara_limiter.acquire()
         response = requests.get(url, params=params, headers=headers)
         response.raise_for_status()
         data = response.json()
@@ -61,7 +62,6 @@ def fetch_deputados_camara(data_dir=None, legislatura=None):
 
         _log.info("  -> Página %s/%s: %d deputados encontrados", pagina, total_paginas, len(dados))
         pagina += 1
-        time.sleep(0.3)
 
     resultado = {"dados": todos_dados}
     if links:
@@ -91,7 +91,6 @@ def fetch_deputados_todas_legislaturas(data_dir=None):
                 dep["idLegislatura"] = leg
                 todos_dados.append(dep)
             _log.info("  -> %d registros de deputados na legislatura %s", len(dados), leg)
-            time.sleep(0.3)
         except Exception as e:
             _log.error("Erro ao buscar legislatura %s: %s", leg, e)
 

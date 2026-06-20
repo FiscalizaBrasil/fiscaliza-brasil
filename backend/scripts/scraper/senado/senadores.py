@@ -5,6 +5,7 @@ import requests
 
 from ..config import DATA_DIR
 from ..cache import is_cache_valid, save_json, download_foto
+from ..rate_limiter import senado_legis_limiter
 
 _log = logging.getLogger("SENADO")
 
@@ -25,6 +26,7 @@ def fetch_senadores_senado(data_dir=None):
     headers = {"accept": "application/json"}
 
     _log.info("Buscando senadores...")
+    senado_legis_limiter.acquire()
     response = requests.get(url, params=params, headers=headers)
     response.raise_for_status()
     data = response.json()

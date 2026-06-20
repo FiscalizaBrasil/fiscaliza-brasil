@@ -1,8 +1,8 @@
-import time
 import logging
 import requests
 
 from .cache import load_json_if_valid, save_json
+from .rate_limiter import get_limiter_for_url
 
 
 def _parse_total_paginas_from_last_link(links, current_total):
@@ -18,7 +18,6 @@ def fetch_paginated(
     url,
     filepath_template,
     params_fn,
-    rate_limit=0.1,
     timeout=30,
     headers=None,
     items_field="dados",
@@ -31,6 +30,7 @@ def fetch_paginated(
     if logger is None:
         logger = logging.getLogger()
 
+    limiter = get_limiter_for_url(url)
     resultados = {}
     pagina = 1
     total_paginas = 1
@@ -49,6 +49,7 @@ def fetch_paginated(
         params = params_fn(pagina)
         logger.info("Buscando %s pagina=%s...", log_label, pagina)
         try:
+            limiter.acquire()
             response = requests.get(url, params=params, headers=headers, timeout=timeout)
             response.raise_for_status()
             data = response.json()
@@ -60,7 +61,6 @@ def fetch_paginated(
                 data.get("links", []), total_paginas
             )
             pagina += 1
-            time.sleep(rate_limit)
         except Exception as e:
             logger.error("Erro ao buscar %s pagina=%s: %s", log_label, pagina, e)
             break
@@ -73,7 +73,6 @@ def fetch_single(
     filepath,
     headers=None,
     timeout=15,
-    rate_limit=0.05,
     log_label="dados",
     logger=None,
 ):
@@ -89,12 +88,13 @@ def fetch_single(
 
     logger.info("Buscando %s...", log_label)
     try:
+        limiter = get_limiter_for_url(url)
+        limiter.acquire()
         response = requests.get(url, headers=headers, timeout=timeout)
         response.raise_for_status()
         data = response.json()
 
         save_json(data, filepath)
-        time.sleep(rate_limit)
         return data
     except Exception as e:
         logger.warning("Erro ao buscar %s: %s", log_label, e)

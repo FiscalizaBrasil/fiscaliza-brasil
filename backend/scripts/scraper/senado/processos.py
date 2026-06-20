@@ -1,11 +1,11 @@
 import os
 import json
-import time
 import logging
 import requests
 
 from ..config import DATA_DIR, ANOS_PADRAO
 from ..cache import is_cache_valid, save_json
+from ..rate_limiter import senado_legis_limiter
 
 _log = logging.getLogger("SENADO")
 
@@ -28,6 +28,7 @@ def fetch_processos_senado_ano(ano, data_dir=None):
 
     _log.info("Buscando processos para ano=%s...", ano)
     try:
+        senado_legis_limiter.acquire()
         response = requests.get(url, params=params, headers=headers, timeout=60)
         response.raise_for_status()
         data = response.json()
@@ -37,7 +38,6 @@ def fetch_processos_senado_ano(ano, data_dir=None):
             data = []
 
         save_json(data, filepath)
-        time.sleep(0.3)
         _log.info("  -> %d processos encontrados para %s", len(data), ano)
         return data
     except Exception as e:
@@ -75,11 +75,11 @@ def fetch_detalhe_processo_senado(processo_id, data_dir=None):
 
     _log.info("Buscando detalhes do processo %s...", processo_id)
     try:
+        senado_legis_limiter.acquire()
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         data = response.json()
         save_json(data, filepath)
-        time.sleep(0.1)
         return data
     except Exception as e:
         _log.warning("Erro ao buscar detalhes do processo %s: %s", processo_id, e)

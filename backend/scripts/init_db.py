@@ -53,7 +53,7 @@ def ensure_schema(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS camara.deputados_mandatos (
             id VARCHAR(20) PRIMARY KEY,
-            deputado_id INTEGER REFERENCES camara.deputados(id),
+            deputado_id INTEGER NOT NULL REFERENCES camara.deputados(id),
             legislatura_id INTEGER NOT NULL REFERENCES camara.legislaturas(id),
             nome_eleitoral TEXT NOT NULL,
             sigla_partido VARCHAR(20),
@@ -73,11 +73,11 @@ def ensure_schema(cursor):
             ano INTEGER NOT NULL,
             mes INTEGER NOT NULL,
             tipo_despesa TEXT NOT NULL,
-            cod_documento VARCHAR(50),
+            cod_documento VARCHAR(50) NOT NULL,
             tipo_documento TEXT,
             cod_tipo_documento INTEGER,
-            data_documento DATE,
-            num_documento TEXT,
+            data_documento DATE NOT NULL,
+            num_documento TEXT NOT NULL,
             valor_documento NUMERIC(15,2) NOT NULL,
             url_documento TEXT,
             nome_fornecedor TEXT NOT NULL,
@@ -87,7 +87,7 @@ def ensure_schema(cursor):
             num_ressarcimento TEXT,
             cod_lote INTEGER NOT NULL,
             parcela INTEGER DEFAULT 0,
-            mandato_id VARCHAR(20) REFERENCES camara.deputados_mandatos(id),
+            mandato_id VARCHAR(20) NOT NULL REFERENCES camara.deputados_mandatos(id),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(cod_documento, num_documento, data_documento, valor_documento, nome_fornecedor)
         );

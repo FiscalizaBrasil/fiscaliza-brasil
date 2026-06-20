@@ -31,7 +31,7 @@ _emendas_downloading = set()
 # Função auxiliar para baixar despesas sob demanda
 # ============================================================
 
-def _ensure_despesas_deputado(deputado_id: int):
+def _ensure_despesas_deputado(deputado_id: int, legislatura: int = None):
     """
     Verifica se existem despesas no banco para o deputado.
     Se não houver, dispara o download prioritário em background.
@@ -59,7 +59,7 @@ def _ensure_despesas_deputado(deputado_id: int):
                 _log.info(f"Sem despesas no banco para deputado {deputado_id}. Disparando download prioritário...")
                 threading.Thread(
                     target=_download_and_import_despesas,
-                    args=(deputado_id,),
+                    args=(deputado_id, legislatura),
                     daemon=True
                 ).start()
     except Exception as e:
@@ -69,15 +69,22 @@ def _ensure_despesas_deputado(deputado_id: int):
             db.release_db_connection(conn)
 
 
-def _download_and_import_despesas(deputado_id: int):
+def _download_and_import_despesas(deputado_id: int, id_legislatura: int = None):
     """
     Baixa as despesas de um deputado e importa para o banco.
     Executado em thread separada.
     Também dispara download de emendas do mesmo deputado.
     """
+    from scripts.scraper.camara import despesas as desp_mod
+    
     try:
-        _log.info(f"Download prioritário: despesas do deputado {deputado_id}")
-        fetch_despesas_deputado(deputado_id)
+        if id_legislatura is not None:
+            anos = desp_mod._anos_legislatura(id_legislatura)
+        else:
+            anos = None
+        
+        _log.info(f"Download prioritário: despesas do deputado {deputado_id} legislatura {id_legislatura or 'N/A'}")
+        fetch_despesas_deputado(deputado_id, anos=anos, id_legislatura=id_legislatura)
         
         # Importa para o banco (apenas este deputado)
         conn = db.get_db_connection()
@@ -292,7 +299,6 @@ def _download_and_import_emendas_deputado(deputado_id: int, nome_deputado: str):
 
 
 @router.get("/legislaturas", summary="Lista todas as legislaturas disponíveis na base")
-@ttl_cache(maxsize=1, ttl=3600, cache_name="camara_legislaturas")
 def get_legislaturas_camara():
     conn = None
     try:
@@ -1225,7 +1231,7 @@ def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Quer
             count_despesas = cursor.fetchone()[0]
             if count_despesas == 0:
                 # Dispara download prioritário em background (já inclui emendas)
-                _ensure_despesas_deputado(deputado_id)
+                _ensure_despesas_deputado(deputado_id, legislatura)
             
             # Também verifica emendas e dispara download se necessário
             cursor.execute("""

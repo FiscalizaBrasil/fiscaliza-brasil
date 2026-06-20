@@ -446,6 +446,64 @@ def import_senadores_senado(conn) -> bool:
 # IMPORTAÇÃO DE DESPESAS - CÂMARA
 # ============================================================
 
+def _inserir_despesa(cursor, despesa: dict, mandato_id: str) -> int:
+    """Insere uma única despesa no banco. Retorna 1 se inseriu, 0 se conflito."""
+    valor_documento = despesa.get("valorDocumento")
+    if valor_documento is not None and not isinstance(valor_documento, (int, float)):
+        try:
+            valor_documento = float(str(valor_documento).replace(",", "."))
+        except (ValueError, TypeError):
+            valor_documento = 0
+
+    valor_liquido = despesa.get("valorLiquido")
+    if valor_liquido is not None and not isinstance(valor_liquido, (int, float)):
+        try:
+            valor_liquido = float(str(valor_liquido).replace(",", "."))
+        except (ValueError, TypeError):
+            valor_liquido = 0
+
+    valor_glosa = despesa.get("valorGlosa")
+    if valor_glosa is not None and not isinstance(valor_glosa, (int, float)):
+        try:
+            valor_glosa = float(str(valor_glosa).replace(",", "."))
+        except (ValueError, TypeError):
+            valor_glosa = 0
+
+    cursor.execute("SAVEPOINT sp_camara_despesa")
+    cursor.execute("""
+        INSERT INTO camara.deputados_despesas
+            (ano, mes, tipo_despesa, cod_documento, tipo_documento,
+             cod_tipo_documento, data_documento, num_documento,
+             valor_documento, url_documento, nome_fornecedor,
+             cnpj_cpf_fornecedor, valor_liquido, valor_glosa,
+             num_ressarcimento, cod_lote, parcela, mandato_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (cod_documento, num_documento, data_documento, valor_documento, nome_fornecedor) 
+        DO NOTHING
+    """, (
+        despesa.get("ano"),
+        despesa.get("mes"),
+        despesa.get("tipoDespesa", ""),
+        despesa.get("codDocumento"),
+        despesa.get("tipoDocumento"),
+        despesa.get("codTipoDocumento"),
+        despesa.get("dataDocumento"),
+        despesa.get("numDocumento"),
+        valor_documento,
+        despesa.get("urlDocumento"),
+        despesa.get("nomeFornecedor", ""),
+        despesa.get("cnpjCpfFornecedor"),
+        valor_liquido,
+        valor_glosa,
+        despesa.get("numRessarcimento"),
+        despesa.get("codLote", 0),
+        despesa.get("parcela", 0),
+        mandato_id
+    ))
+    cursor.execute("RELEASE SAVEPOINT sp_camara_despesa")
+    return 1 if cursor.rowcount > 0 else 0
+
+
 def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
     """
     Lê os JSONs de despesas em backend/data/camara/despesas/{deputado_id}/
@@ -542,7 +600,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                     # Pré-busca todos os mandatos do deputado com seu período (ano início)
                     cursor.execute("""
                         SELECT m.id, m.legislatura_id, 
-                               CAST(SPLIT_PART(l.data_inicio, '-', 1) AS INTEGER) as ano_inicio
+                               EXTRACT(YEAR FROM l.data_inicio)::integer as ano_inicio
                         FROM camara.deputados_mandatos m
                         JOIN camara.legislaturas l ON m.legislatura_id = l.id
                         WHERE m.deputado_id = %s
@@ -602,104 +660,76 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                             erro_mandato = True
                             continue
                     
-                    # Mapeia ano -> mandato_id (cada mandato cobre 4 anos a partir do ano_inicio)
+                    # Mapeia legislatura_id -> mandato_id
+                    mandato_por_legislatura = {}
                     mandato_por_ano = {}
                     for m_id, leg_id, ano_ini in mandatos_info:
+                        mandato_por_legislatura[leg_id] = m_id
                         for y in range(ano_ini, ano_ini + 4):
                             if y not in mandato_por_ano:
                                 mandato_por_ano[y] = m_id
                     
-                    # Fallback: mandato mais recente
                     mandato_fallback = mandatos_info[0][0]
+
+                    # Determina estrutura: novo formato (subdir por legislatura) ou antigo (arquivos diretos)
+                    try:
+                        dir_contents = os.listdir(dep_dir)
+                    except OSError:
+                        dir_contents = []
                     
-                    # Percorre os arquivos JSON de cada ano/página
-                    for fname in sorted(os.listdir(dep_dir)):
-                        if not fname.endswith(".json"):
-                            continue
-                        
-                        # Extrai o ano do nome do arquivo (ex: "2023_pagina1.json" -> 2023)
-                        try:
-                            ano_arquivo = int(fname.split('_')[0])
-                        except (ValueError, IndexError):
-                            ano_arquivo = None
-                        
-                        mandato_id = mandato_por_ano.get(ano_arquivo, mandato_fallback)
-                        
-                        filepath = os.path.join(dep_dir, fname)
-                        with open(filepath, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                        
-                        dados = data.get("dados", [])
-                        if not dados:
-                            continue
-                        
-                        for despesa in dados:
-                            try:
-                                valor_documento = despesa.get("valorDocumento")
-                                if valor_documento is not None and not isinstance(valor_documento, (int, float)):
-                                    try:
-                                        valor_documento = float(str(valor_documento).replace(",", "."))
-                                    except (ValueError, TypeError):
-                                        valor_documento = 0
-                                
-                                valor_liquido = despesa.get("valorLiquido")
-                                if valor_liquido is not None and not isinstance(valor_liquido, (int, float)):
-                                    try:
-                                        valor_liquido = float(str(valor_liquido).replace(",", "."))
-                                    except (ValueError, TypeError):
-                                        valor_liquido = 0
-                                
-                                valor_glosa = despesa.get("valorGlosa")
-                                if valor_glosa is not None and not isinstance(valor_glosa, (int, float)):
-                                    try:
-                                        valor_glosa = float(str(valor_glosa).replace(",", "."))
-                                    except (ValueError, TypeError):
-                                        valor_glosa = 0
-                                
-                                cursor.execute("SAVEPOINT sp_camara_despesa")
-                                cursor.execute("""
-                                    INSERT INTO camara.deputados_despesas
-                                        (ano, mes, tipo_despesa, cod_documento, tipo_documento,
-                                         cod_tipo_documento, data_documento, num_documento,
-                                         valor_documento, url_documento, nome_fornecedor,
-                                         cnpj_cpf_fornecedor, valor_liquido, valor_glosa,
-                                         num_ressarcimento, cod_lote, parcela, mandato_id)
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                    ON CONFLICT (cod_documento, num_documento, data_documento, valor_documento, nome_fornecedor) 
-                                    DO NOTHING
-                                """, (
-                                    despesa.get("ano"),
-                                    despesa.get("mes"),
-                                    despesa.get("tipoDespesa", ""),
-                                    despesa.get("codDocumento"),
-                                    despesa.get("tipoDocumento"),
-                                    despesa.get("codTipoDocumento"),
-                                    despesa.get("dataDocumento"),
-                                    despesa.get("numDocumento"),
-                                    valor_documento,
-                                    despesa.get("urlDocumento"),
-                                    despesa.get("nomeFornecedor", ""),
-                                    despesa.get("cnpjCpfFornecedor"),
-                                    valor_liquido,
-                                    valor_glosa,
-                                    despesa.get("numRessarcimento"),
-                                    despesa.get("codLote", 0),
-                                    despesa.get("parcela", 0),
-                                    mandato_id
-                                ))
-                                cursor.execute("RELEASE SAVEPOINT sp_camara_despesa")
-                                if cursor.rowcount > 0:
-                                    inseridos_dep += 1
-                            except Exception as e:
-                                logging.error(f"Erro ao inserir despesa do deputado {dep_id} (doc={despesa.get('codDocumento')}, valor={despesa.get('valorDocumento')}): {e}")
-                                cursor.execute("ROLLBACK TO SAVEPOINT sp_camara_despesa")
+                    leg_subdirs = [
+                        d for d in dir_contents
+                        if os.path.isdir(os.path.join(dep_dir, d)) and d.lstrip('-').isdigit()
+                    ]
+                    
+                    if leg_subdirs:
+                        # === NOVO FORMATO: despesas/{dep_id}/{legislatura}/{ano}_pagina{n}.json ===
+                        for leg_str in sorted(leg_subdirs):
+                            leg_id = int(leg_str)
+                            leg_dir = os.path.join(dep_dir, leg_str)
+                            mandato_id = mandato_por_legislatura.get(leg_id, mandato_fallback)
+                            
+                            for fname in sorted(os.listdir(leg_dir)):
+                                if not fname.endswith(".json"):
+                                    continue
+                                filepath = os.path.join(leg_dir, fname)
+                                with open(filepath, "r", encoding="utf-8") as f:
+                                    data = json.load(f)
+                                dados = data.get("dados", [])
+                                if not dados:
+                                    continue
+                                for despesa in dados:
+                                    inseridos_dep += _inserir_despesa(cursor, despesa, mandato_id)
+                                conn.commit()
+                    else:
+                        # === FORMATO ANTIGO: despesas/{dep_id}/{ano}_pagina{n}.json (backward compat) ===
+                        for fname in sorted(dir_contents):
+                            if not fname.endswith(".json"):
                                 continue
-                        else:
+                            
+                            try:
+                                ano_arquivo = int(fname.split('_')[0])
+                            except (ValueError, IndexError):
+                                ano_arquivo = None
+                            
+                            mandato_id = mandato_por_ano.get(ano_arquivo, mandato_fallback)
+                            
+                            filepath = os.path.join(dep_dir, fname)
+                            with open(filepath, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                            
+                            dados = data.get("dados", [])
+                            if not dados:
+                                continue
+                            
+                            for despesa in dados:
+                                inseridos_dep += _inserir_despesa(cursor, despesa, mandato_id)
                             conn.commit()
-                            total_inseridos += inseridos_dep
-                            if inseridos_dep > 0:
-                                logging.info(f"Deputado {dep_id}: {inseridos_dep} despesas importadas.")
-                            _despesas_camara_importadas.add(dep_id)
+                    
+                    total_inseridos += inseridos_dep
+                    if inseridos_dep > 0:
+                        logging.info(f"Deputado {dep_id}: {inseridos_dep} despesas importadas.")
+                    _despesas_camara_importadas.add(dep_id)
             except Exception as e:
                 logging.error(f"Erro ao processar deputado {dep_id}: {e}")
                 conn.rollback()

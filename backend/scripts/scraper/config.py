@@ -18,3 +18,9 @@ PORTAL_API_BASE = "https://api.portaldatransparencia.gov.br/api-de-dados"
 
 ANOS_PADRAO = list(range(2026, 2018, -1))
 LEGISLATURAS = [57, 56, 55]
+
+# Rate limits globais (requisições/segundo, soma de todas as threads)
+CAMARA_RATE_LIMIT = 10         # dadosabertos.camara.leg.br
+SENADO_LEGIS_RATE_LIMIT = 5    # legis.senado.leg.br
+SENADO_ADM_RATE_LIMIT = 1      # adm.senado.gov.br (API lenta, ~10MB/resposta)
+PORTAL_RATE_LIMIT = 10         # api.portaldatransparencia.gov.br
