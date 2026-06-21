@@ -53,6 +53,7 @@ export interface EstatisticasSenado {
     partidos: { partido: string; total: number; percentual: number }[]
     categorias: { categoria: string; total: number }[]
     top_10: { codigo: number; nome: string; partido: string; uf: string; foto: string; total: number }[]
+    evolucao_gastos: { ano: number; mes: number; valor: number }[]
 }
 
 export interface ProjetoLegislativoSenado {

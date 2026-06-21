@@ -2,8 +2,9 @@ import os
 import json
 import logging
 import requests
+from datetime import datetime
 
-from ..config import DATA_DIR, ANOS_PADRAO
+from ..config import DATA_DIR, SENADO_ANO_INICIO
 from ..cache import is_cache_valid, save_json
 from ..rate_limiter import senado_adm_limiter
 
@@ -42,5 +43,6 @@ def fetch_despesas_senado_todas(data_dir=None):
     if data_dir is None:
         data_dir = os.path.join(DATA_DIR, "senado", "despesas")
 
-    for ano in ANOS_PADRAO:
+    ano_atual = datetime.now().year
+    for ano in range(ano_atual, SENADO_ANO_INICIO - 1, -1):
         fetch_despesas_senado_ano(ano, data_dir=data_dir)

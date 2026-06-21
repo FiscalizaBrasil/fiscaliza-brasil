@@ -33,4 +33,4 @@ from .lifecycle import (
     main,
 )
 
-from .worker import scraping_status
+from .config import scraping_status

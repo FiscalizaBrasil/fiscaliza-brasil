@@ -56,29 +56,37 @@
         </BaseCard>
       </div>
 
-      <div class="grid gap-6 lg:grid-cols-3">
-        <!-- Gastos nos Últimos Meses -->
-        <BaseCard>
-          <template #header>
-            <h3 class="text-lg font-semibold text-foreground">Gastos nos Últimos Meses</h3>
-          </template>
-          <div v-if="gastosUltimosMeses.length" class="space-y-4">
-            <div v-for="mes in gastosUltimosMeses" :key="mes.label" class="flex items-center gap-4">
-              <div :class="`w-3 h-3 rounded-full ${mes.color}`" />
-              <div class="flex-1">
-                <div class="flex justify-between text-sm mb-1">
-                  <span class="text-foreground font-medium">{{ mes.label }}</span>
-                  <span class="text-muted-foreground">{{ mes.valorFormatado }}</span>
-                </div>
-                <div class="h-2 bg-muted rounded-full overflow-hidden">
-                  <div :class="`h-full rounded-full ${mes.color}`" :style="{ width: `${mes.percentage}%` }" />
-                </div>
-              </div>
+      <!-- Evolução de Gastos (full-width) -->
+      <BaseCard class="mb-8">
+        <template #header>
+          <div class="flex items-center justify-between flex-wrap gap-4">
+            <h3 class="text-lg font-semibold text-foreground">{{ tituloEvolucao }}</h3>
+            <div v-if="opcoesDropdown.length > 0" class="relative">
+              <select
+                v-model="dropdownSelecionado"
+                class="appearance-none bg-background/50 border border-border/50 text-foreground text-sm rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+              >
+                <option
+                  v-for="opt in opcoesDropdown"
+                  :key="opt.value"
+                  :value="opt.value"
+                >
+                  {{ opt.label }}
+                </option>
+              </select>
+              <ChevronDown class="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             </div>
           </div>
-          <BaseLoading v-else message="Carregando dados..." />
-        </BaseCard>
+        </template>
+        <div v-if="chartData" class="p-4 h-72">
+          <Bar :data="chartData" :options="chartOptions" />
+        </div>
+        <div v-else class="p-8 flex items-center justify-center">
+          <BaseLoading message="Carregando evolução de gastos..." />
+        </div>
+      </BaseCard>
 
+      <div class="grid gap-6 lg:grid-cols-2">
         <!-- Maiores Bancadas -->
         <BaseCard>
           <template #header>
@@ -133,12 +141,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { Users, MapPin, Flag, Map } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Users, MapPin, Flag, Map, ChevronDown } from 'lucide-vue-next'
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, BarController, Tooltip, Legend } from 'chart.js'
+import { Bar } from 'vue-chartjs'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { useCamaraStore } from '@/stores/camara'
 import { formatCurrency } from '@/utils/format'
+
+ChartJS.register(BarElement, CategoryScale, LinearScale, BarController, Tooltip, Legend)
 
 const store = useCamaraStore()
 
@@ -150,13 +162,11 @@ onMounted(() => {
   }
 })
 
-const mesesPtBr: Record<number, string> = {
-  1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril',
-  5: 'Maio', 6: 'Junho', 7: 'Julho', 8: 'Agosto',
-  9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro',
+const mesesAbrev: Record<number, string> = {
+  1: 'Jan', 2: 'Fev', 3: 'Mar', 4: 'Abr',
+  5: 'Mai', 6: 'Jun', 7: 'Jul', 8: 'Ago',
+  9: 'Set', 10: 'Out', 11: 'Nov', 12: 'Dez',
 }
-
-const chartColors = ['bg-chart-1', 'bg-chart-2', 'bg-chart-3', 'bg-chart-4', 'bg-chart-5']
 
 const totalRegioes = computed(() => {
   if (store.deputadoStats?.total_regioes !== undefined) return store.deputadoStats.total_regioes
@@ -168,18 +178,156 @@ const totalUfs = computed(() => {
   return store.estadosUnicos.length
 })
 
-const gastosUltimosMeses = computed(() => {
-  if (!store.generalStats?.gastos_por_mes) return []
+const evolucao = computed(() => store.generalStats?.evolucao_gastos ?? [])
 
-  const ultimos = store.generalStats.gastos_por_mes.slice(0, 5)
-  const maxValor = Math.max(...ultimos.map(m => m.valor), 1)
+const legislaturaSelecionada = computed(() => store.legislatura)
 
-  return ultimos.map((m, i) => ({
-    label: `${mesesPtBr[m.mes] || m.mes} ${m.ano}`,
-    valorFormatado: formatCurrency(m.valor),
-    color: chartColors[i % chartColors.length],
-    percentage: (m.valor / maxValor) * 100,
-  }))
+// Determine mode: mensal (specific legislature) or anual (todas)
+const isModoMensal = computed(() => legislaturaSelecionada.value !== 0)
+
+// Years available when in mensal mode (from evolucao data)
+const anosDisponiveis = computed(() => {
+  const anos = new Set(
+    evolucao.value.filter(e => e.mes > 0).map(e => e.ano)
+  )
+  return Array.from(anos).sort()
+})
+
+// For anual mode: available legislatures to filter by
+const legislaturasParaDropdown = computed(() => {
+  return store.legislaturasDisponiveis.slice().sort((a: number, b: number) => b - a)
+})
+
+const dropdownSelecionado = ref<number>(0)
+
+const tituloEvolucao = computed(() => {
+  if (isModoMensal.value) {
+    return 'Evolução de Gastos'
+  }
+  return 'Evolução de Gastos por Ano'
+})
+
+// Dropdown options
+const opcoesDropdown = computed(() => {
+  if (isModoMensal.value) {
+    return anosDisponiveis.value.map(a => ({ value: a, label: String(a) }))
+  }
+  // Anual mode: filter by legislature
+  const opts = []
+  for (const leg of legislaturasParaDropdown.value) {
+    const startYear = 2023 - (57 - leg) * 4
+    const endYear = startYear + 3
+    opts.push({ value: leg, label: `${leg}ª (${startYear}-${endYear})` })
+  }
+  return opts
+})
+
+const formatLegislaturaPeriodo = (legis: number): { start: number; end: number } => {
+  const startYear = 2023 - (57 - legis) * 4
+  return { start: startYear, end: startYear + 3 }
+}
+
+// Filter evolucao data for the monthly chart
+const dadosFiltradosMensal = computed(() => {
+  if (!isModoMensal.value) return []
+  const ano = dropdownSelecionado.value
+  return evolucao.value
+    .filter(e => e.ano === ano && e.mes > 0)
+    .sort((a, b) => a.mes - b.mes)
+})
+
+// Filter evolucao data for the anual chart
+const dadosFiltradosAnual = computed(() => {
+  if (isModoMensal.value) return []
+  const legis = dropdownSelecionado.value
+  if (legis === 0) {
+    return evolucao.value.filter(e => e.mes === 0).sort((a, b) => a.ano - b.ano)
+  }
+  const { start, end } = formatLegislaturaPeriodo(legis)
+  return evolucao.value
+    .filter(e => e.mes === 0 && e.ano >= start && e.ano <= end)
+    .sort((a, b) => a.ano - b.ano)
+})
+
+const chartData = computed(() => {
+  const dados = isModoMensal.value ? dadosFiltradosMensal.value : dadosFiltradosAnual.value
+  if (!dados.length) return null
+
+  if (isModoMensal.value) {
+    return {
+      labels: dados.map(d => mesesAbrev[d.mes] || d.mes),
+      datasets: [{
+        label: 'Gastos',
+        data: dados.map(d => d.valor),
+        backgroundColor: 'rgba(34, 139, 34, 0.7)',
+        borderColor: 'rgba(34, 139, 34, 1)',
+        borderWidth: 1,
+        borderRadius: 4,
+      }]
+    }
+  }
+
+  return {
+    labels: dados.map(d => String(d.ano)),
+    datasets: [{
+      label: 'Gastos',
+      data: dados.map(d => d.valor),
+      backgroundColor: 'rgba(34, 139, 34, 0.7)',
+      borderColor: 'rgba(34, 139, 34, 1)',
+      borderWidth: 1,
+      borderRadius: 4,
+    }]
+  }
+})
+
+const chartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (ctx: any) => formatCurrency(ctx.raw as number)
+      }
+    }
+  },
+  scales: {
+    x: {
+      grid: { display: false },
+      ticks: { color: '#888' }
+    },
+    y: {
+      beginAtZero: true,
+      grid: { color: 'rgba(0,0,0,0.06)' },
+      ticks: {
+        color: '#888',
+        callback: (val: any) => {
+          if (val >= 1_000_000) return `R$ ${(val / 1_000_000).toFixed(1)}M`
+          if (val >= 1_000) return `R$ ${(val / 1_000).toFixed(0)}K`
+          return `R$ ${val}`
+        }
+      }
+    }
+  }
+}
+
+// Initialize dropdown selection
+watch([anosDisponiveis, isModoMensal], ([anos, mensal]) => {
+  if (mensal && anos.length > 0) {
+    dropdownSelecionado.value = anos[anos.length - 1]
+  }
+}, { immediate: true })
+
+watch(isModoMensal, (mensal) => {
+  if (!mensal) {
+    const legs = legislaturasParaDropdown.value
+    dropdownSelecionado.value = legs.length > 0 ? legs[0] : 0
+  }
+}, { immediate: true })
+
+// Reload stats when legislatura changes
+watch(legislaturaSelecionada, () => {
+  store.fetchEstatisticasGerais()
 })
 
 const topPartidos = computed(() => {
@@ -203,4 +351,3 @@ const maxBancada = computed(() => {
   return topPartidos.value[0].deputados
 })
 </script>
-

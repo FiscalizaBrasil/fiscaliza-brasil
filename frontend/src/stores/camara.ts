@@ -83,6 +83,7 @@ export interface EstatisticasGerais {
     estado: string
     total_gasto: number
   }[]
+  evolucao_gastos: { ano: number; mes: number; valor: number }[]
 }
 
 export interface EstatisticasDeputado {

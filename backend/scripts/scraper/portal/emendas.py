@@ -44,21 +44,36 @@ def fetch_emendas_parlamentar(nome_autor, ano=None, pagina=1, data_dir=None):
 
     _log.info("Buscando emendas de %s (ano=%s, página %s)...",
               nome_autor.upper(), ano or "todos", pagina)
-    try:
-        portal_limiter.acquire()
-        response = requests.get(url, params=params, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
 
-        if not isinstance(data, list) or len(data) == 0:
+    max_retries = 3
+    for attempt in range(max_retries):
+        portal_limiter.acquire()
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+
+            if not isinstance(data, list) or len(data) == 0:
+                return {"emendas": []}
+
+            result = {"emendas": data}
+            save_json(result, filepath)
+            return result
+        except requests.exceptions.HTTPError as e:
+            status_code = response.status_code if response is not None else 0
+            if status_code == 403 and attempt < max_retries - 1:
+                wait = 2 ** attempt * 5
+                _log.warning("403 para %s (ano=%s), tentativa %d/%d, aguardando %ds...",
+                             nome_autor, ano or "todos", attempt + 1, max_retries, wait)
+                time.sleep(wait)
+                continue
+            _log.error("Erro ao buscar emendas de %s: %s", nome_autor, e)
+            return {"emendas": [], "_error_403": status_code == 403}
+        except Exception as e:
+            _log.error("Erro ao buscar emendas de %s: %s", nome_autor, e)
             return {"emendas": []}
 
-        result = {"emendas": data}
-        save_json(result, filepath)
-        return result
-    except Exception as e:
-        _log.error("Erro ao buscar emendas de %s: %s", nome_autor, e)
-        return {"emendas": []}
+    return {"emendas": [], "_error_403": True}
 
 
 def fetch_emendas_todas(data_dir=None):

@@ -4,15 +4,14 @@ import logging
 from .config import DATA_DIR
 from .camara.deputados import fetch_deputados_camara, download_fotos_deputados
 from .senado.senadores import fetch_senadores_senado, download_fotos_senadores
-from . import worker as _worker
 
 _log = logging.getLogger("WORKER")
 
 
 def start_background_import():
-    """Importa dados cacheados em background e só depois inicia os scrapers."""
+    """Importa dados cacheados em background e inicia os scrapers em paralelo."""
 
-    def _run():
+    def _run_import():
         _log.info("Importando dados cacheados do disco em background...")
         conn = None
         try:
@@ -36,14 +35,16 @@ def start_background_import():
                     db.release_db_connection(conn)
                 except Exception:
                     pass
-            _log.info("Iniciando scrapers em background...")
-            start_background_scraper()
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run_import, daemon=True).start()
     _log.info("Importação de dados disparada em thread separada.")
+
+    _log.info("Iniciando scrapers em background (em paralelo com a importação)...")
+    start_background_scraper()
 
 
 def start_background_scraper():
+    from . import worker as _worker
     if (
         _worker._background_thread_camara
         and _worker._background_thread_camara.is_alive()
@@ -87,6 +88,7 @@ def start_background_scraper():
 
 
 def stop_background_scraper():
+    from . import worker as _worker
     _worker._stop_camara = True
     _worker._stop_senado = True
     _worker._stop_portal = True

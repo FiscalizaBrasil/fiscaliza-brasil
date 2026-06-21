@@ -8,7 +8,7 @@ import threading
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .config import DATA_DIR, ANOS_PADRAO, SENADO_ULTIMO_ANO_CACHE_SECONDS
+from .config import DATA_DIR, ANOS_PADRAO, SENADO_ULTIMO_ANO_CACHE_SECONDS, SENADO_ANO_INICIO, scraping_status, _status_lock
 from .cache import is_cache_valid, remover_acentos
 
 from .camara.deputados import fetch_deputados_todas_legislaturas
@@ -36,8 +36,10 @@ try:
         import_detalhes_deputados,
         import_processos_senado,
         import_proposicoes_deputado,
+        _buscar_e_inserir_senador_api,
     )
 except ImportError:
+    logging.exception("Falha ao importar módulos de dados:")
     db = None
     import_despesas_camara = None
     import_despesas_senado = None
@@ -50,6 +52,7 @@ except ImportError:
     import_detalhes_deputados = None
     import_processos_senado = None
     import_proposicoes_deputado = None
+    _buscar_e_inserir_senador_api = None
 
 # ---------------------------------------------------------------------------
 # Named loggers so each scraper emits prefixed messages automatically
@@ -73,19 +76,6 @@ _stop_camara = False
 _stop_senado = False
 _stop_portal = False
 
-_status_lock = threading.Lock()
-
-scraping_status = {
-    "em_andamento": False,
-    "camara_pendentes": 0,
-    "senado_pendentes": 0,
-    "camara_completa": False,
-    "senado_completo": False,
-    "proposicoes_pendentes": 0,
-    "proposicoes_completa": False,
-    "deputados_perfil_pendente": True,
-    "senadores_perfil_pendente": True,
-}
 
 # ---------------------------------------------------------------------------
 # Retry tracking – rebaixa arquivos em vez de deletar, registra itens com
@@ -314,7 +304,8 @@ def _get_anos_senado_pendentes(data_dir=None):
     if data_dir is None:
         data_dir = os.path.join(DATA_DIR, "senado", "despesas")
 
-    anos = list(ANOS_PADRAO)
+    ano_atual = datetime.datetime.now().year
+    anos = list(range(ano_atual, SENADO_ANO_INICIO - 1, -1))
     pendentes = []
     for ano in anos:
         filepath = os.path.join(data_dir, f"{ano}.json")
@@ -594,12 +585,20 @@ def _processar_ano_senado(ano):
 def _processar_emendas_parlamentar(nome):
     def _fetch():
         ano_atual = datetime.datetime.now().year
+        consecutive_403 = 0
         for ano in range(2015, ano_atual + 1):
             pagina = 1
             while True:
                 result = fetch_emendas_parlamentar(nome, ano=ano, pagina=pagina)
                 if not result.get("emendas", []):
+                    if result.get("_error_403"):
+                        consecutive_403 += 1
+                        if consecutive_403 >= 3:
+                            return
+                    else:
+                        consecutive_403 = 0
                     break
+                consecutive_403 = 0
                 pagina += 1
                 if pagina > 50:
                     break
@@ -750,6 +749,61 @@ def _processar_perfil_deputados():
         log_camara.error("Erro no perfil de deputados: %s", e)
 
 
+def _garantir_senadores_despesas():
+    """
+    Garante que todo cod_senador presente em despesa_ceaps tenha
+    registro em parlamentar + mandato no banco.
+    Utiliza cache em disco (data/senado/detalhes/{codigo}.json) para
+    evitar chamadas repetidas à API.
+    """
+    if _buscar_e_inserir_senador_api is None:
+        return
+
+    conn = db.get_db_connection() if db is not None else None
+    if not conn:
+        return
+
+    try:
+        with conn.cursor() as cur:
+            # 1. Senadores em despesas sem registro em parlamentar
+            cur.execute("""
+                SELECT DISTINCT d.cod_senador
+                FROM senado.despesa_ceaps d
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM senado.parlamentar p WHERE p.codigo = d.cod_senador
+                )
+            """)
+            sem_parlamentar = [row[0] for row in cur.fetchall()]
+
+            for cod in sem_parlamentar:
+                _buscar_e_inserir_senador_api(cur, cod)
+                conn.commit()
+
+            # 2. Senadores em parlamentar sem mandato
+            cur.execute("""
+                SELECT p.codigo
+                FROM senado.parlamentar p
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM senado.mandato m WHERE m.codigo_parlamentar = p.codigo
+                )
+            """)
+            sem_mandato = [row[0] for row in cur.fetchall()]
+
+            for cod in sem_mandato:
+                _buscar_e_inserir_senador_api(cur, cod)
+                conn.commit()
+
+            if sem_parlamentar or sem_mandato:
+                log_senado.info(
+                    "Integridade de senadores: %d sem parlamentar, %d sem mandato.",
+                    len(sem_parlamentar), len(sem_mandato),
+                )
+    except Exception as e:
+        log_senado.error("Erro ao garantir integridade de senadores: %s", e)
+    finally:
+        db.release_db_connection(conn)
+
+
 def _processar_perfil_senadores():
     global scraping_status
     if not scraping_status.get("senadores_perfil_pendente", False):
@@ -760,8 +814,9 @@ def _processar_perfil_senadores():
         fetch_senadores_senado()
 
         import_ok = False
+        conn_failed = False
         if import_senadores_senado is not None:
-            conn = db.get_db_connection()
+            conn = db.get_db_connection() if db is not None else None
             if conn:
                 try:
                     import_ok = import_senadores_senado(conn)
@@ -769,13 +824,29 @@ def _processar_perfil_senadores():
                         log_senado.info("Perfil de senadores importado.")
                 finally:
                     db.release_db_connection(conn)
+            else:
+                conn_failed = True
 
         if not import_ok:
-            log_senado.warning(
-                "Importação de perfil de senadores falhou ou nada a importar. "
-                "Arquivos mantidos para retry automático."
-            )
+            if conn_failed:
+                log_senado.warning(
+                    "Falha ao conectar ao banco para importar perfil de senadores. "
+                    "Arquivos mantidos para retry automático."
+                )
+            elif import_senadores_senado is None:
+                log_senado.warning(
+                    "Módulo de importação não disponível. "
+                    "Arquivos mantidos para retry automático."
+                )
+            else:
+                log_senado.warning(
+                    "Importação de perfil de senadores: arquivo não encontrado ou vazio. "
+                    "Arquivos mantidos para retry automático."
+                )
             return
+
+        # Garantir integridade: parlamentares e mandatos para senadores históricos
+        _garantir_senadores_despesas()
 
         with _status_lock:
             scraping_status["senadores_perfil_pendente"] = False
@@ -941,6 +1012,9 @@ def _background_worker_camara():
 
 
 def _build_senado_tasks():
+    # Garantir integridade de senadores históricos (parlamentar + mandato)
+    _garantir_senadores_despesas()
+
     pendentes = _get_anos_senado_pendentes()
     complete = len(pendentes) == 0
 

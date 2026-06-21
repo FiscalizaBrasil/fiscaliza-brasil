@@ -284,12 +284,13 @@ def ensure_schema(cursor):
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS senado.mandato (
-            codigo_mandato VARCHAR(20) PRIMARY KEY,
-            codigo_parlamentar INTEGER REFERENCES senado.parlamentar(codigo) ON DELETE CASCADE,
+            codigo_mandato VARCHAR(20) NOT NULL,
+            codigo_parlamentar INTEGER NOT NULL REFERENCES senado.parlamentar(codigo) ON DELETE CASCADE,
             uf CHAR(2),
             descricao_participacao VARCHAR(50),
             primeira_legislatura VARCHAR(10) NOT NULL REFERENCES senado.legislatura(numero),
             segunda_legislatura VARCHAR(10) NOT NULL DEFAULT '' REFERENCES senado.legislatura(numero),
+            PRIMARY KEY (codigo_mandato, codigo_parlamentar),
             CONSTRAINT mandato_legislatura_check CHECK (primeira_legislatura IS NOT NULL AND TRIM(primeira_legislatura) != '')
         );
     """)

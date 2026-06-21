@@ -8,8 +8,8 @@ import os
 import json
 import logging
 import sys
-import requests
 import time
+import requests
 import threading
 import unicodedata
 from typing import Optional
@@ -19,6 +19,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 try:
     from database import db
+    from scripts.scraper.cache import is_cache_valid, save_json
+    from scripts.scraper.rate_limiter import senado_legis_limiter
 except ImportError as e:
     logging.error(f"Error importing database module: {e}")
     sys.exit(1)
@@ -46,145 +48,158 @@ _emendas_importadas: set[str] = set()               # nomes de arquivos já impo
 
 def _buscar_e_inserir_senador_api(cursor, cod_senador: int) -> bool:
     """
-    Busca dados de um senador na API pública do Senado e insere na tabela parlamentar.
+    Busca dados de um senador e insere na tabela parlamentar, com mandatos.
+    Ordem de consulta: DB → cache em disco → API.
     Retorna True se conseguiu inserir, False caso contrário.
     
     API: GET https://legis.senado.leg.br/dadosabertos/senador/{codigo}?v=6
+    API Mandatos: GET https://legis.senado.leg.br/dadosabertos/senador/{codigo}/mandatos?v=5
     """
     global _senadores_buscados_api
     
-    # Evita chamadas repetidas para o mesmo código
+    # Evita chamadas repetidas para o mesmo código dentro da sessão
     with _global_cache_lock:
         if cod_senador in _senadores_buscados_api:
             return False
         _senadores_buscados_api.add(cod_senador)
     
-    url = f"https://legis.senado.leg.br/dadosabertos/senador/{cod_senador}?v=6"
-    headers = {"accept": "application/json"}
+    detalhes_dir = os.path.join(DATA_DIR, "senado", "detalhes")
+    cache_path = os.path.join(detalhes_dir, f"{cod_senador}.json")
     
-    try:
+    # 1. Tenta carregar do cache em disco
+    if is_cache_valid(cache_path):
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        logging.info(f"Senador {cod_senador}: carregado do cache em disco.")
+    else:
+        # 2. Busca na API
+        url = f"https://legis.senado.leg.br/dadosabertos/senador/{cod_senador}?v=6"
+        headers = {"accept": "application/json"}
+        
         logging.info(f"Buscando dados do senador {cod_senador} na API...")
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Navega na estrutura do JSON para encontrar os dados do parlamentar
-        parlamentar = (
-            data.get("DetalheParlamentar", {})
-            .get("Parlamentar", {})
-        )
-        
-        if not parlamentar:
-            logging.warning(f"API não retornou dados para o senador {cod_senador}")
-            return False
-        
-        ident = parlamentar.get("IdentificacaoParlamentar", {})
-        
-        codigo = int(ident.get("CodigoParlamentar", 0))
-        if not codigo or codigo != cod_senador:
-            logging.warning(f"Código retornado pela API ({codigo}) não corresponde ao solicitado ({cod_senador})")
-            return False
-        
-        nome_parlamentar = ident.get("NomeParlamentar", "").strip()
-        nome_completo = ident.get("NomeCompletoParlamentar", "").strip()
-        sexo = ident.get("SexoParlamentar", "")
-        sigla_partido = ident.get("SiglaPartidoParlamentar", "")
-        uf = ident.get("UfParlamentar", "")
-        url_foto = ident.get("UrlFotoParlamentar", "")
-        url_pagina = ident.get("UrlPaginaParlamentar", "")
-        email = ident.get("EmailParlamentar", "")
-        
-        if not nome_parlamentar:
-            nome_parlamentar = f"Senador {cod_senador}"
-        
-        # 1. Insere/ignora parlamentar
-        cursor.execute("""
-            INSERT INTO senado.parlamentar
-                (codigo, nome_parlamentar, nome_completo, sexo,
-                 sigla_partido, uf, url_foto, url_pagina, email)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (codigo) DO NOTHING
-        """, (codigo, nome_parlamentar, nome_completo, sexo,
-              sigla_partido, uf, url_foto, url_pagina, email))
-        
-        # 2. Tenta buscar mandatos em endpoint separado
         try:
-            url_mandatos = f"https://legis.senado.leg.br/dadosabertos/senador/{cod_senador}/mandatos?v=5"
-            resp_mandatos = requests.get(url_mandatos, headers=headers, timeout=10)
-            if resp_mandatos.status_code == 200:
-                dados_mandatos = resp_mandatos.json()
-                mandatos = (
-                    dados_mandatos.get("Mandatos", {})
-                    .get("Mandato", [])
-                )
-                if isinstance(mandatos, dict):
-                    mandatos = [mandatos]
-                for mandato in mandatos:
-                    codigo_mandato = mandato.get("CodigoMandato", "")
-                    if codigo_mandato:
-                        uf_mandato = mandato.get("UfParlamentar", uf)
-                        descricao = mandato.get("DescricaoParticipacao", "")
-                        
-                        # Insere legislaturas do mandato
-                        for leg_key in ["PrimeiraLegislaturaDoMandato", "SegundaLegislaturaDoMandato"]:
-                            leg_info = mandato.get(leg_key)
-                            if leg_info:
-                                num_leg = leg_info.get("NumeroLegislatura")
-                                data_inicio = leg_info.get("DataInicio")
-                                data_fim = leg_info.get("DataFim")
-                                if num_leg:
-                                    cursor.execute("""
-                                        INSERT INTO senado.legislatura (numero, data_inicio, data_fim)
-                                        VALUES (%s, %s, %s)
-                                        ON CONFLICT (numero) DO NOTHING
-                                    """, (num_leg, data_inicio, data_fim))
-                        
-                        prim_leg = mandato.get("PrimeiraLegislaturaDoMandato", {})
-                        seg_leg = mandato.get("SegundaLegislaturaDoMandato")
-                        primeira_leg = prim_leg.get("NumeroLegislatura", "") if prim_leg else ""
-                        segunda_leg = seg_leg.get("NumeroLegislatura", "") if seg_leg else ""
-
-                        # Validação: primeira_legislatura é obrigatória
-                        if not primeira_leg or not primeira_leg.strip():
-                            logging.warning(
-                                f"Mandato {codigo_mandato} do senador {codigo} "
-                                f"ignorado (via API): primeira_legislatura vazia."
-                            )
-                            continue
-
-                        # Garante que segunda_legislatura não seja NULL
-                        if segunda_leg is None:
-                            segunda_leg = ""
-
-                        cursor.execute("""
-                            INSERT INTO senado.mandato
-                                (codigo_mandato, codigo_parlamentar, uf,
-                                 descricao_participacao,
-                                 primeira_legislatura, segunda_legislatura)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (codigo_mandato) DO NOTHING
-                        """, (codigo_mandato, codigo, uf_mandato,
-                              descricao, primeira_leg, segunda_leg))
+            senado_legis_limiter.acquire()
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            save_json(data, cache_path)
+        except requests.exceptions.Timeout:
+            logging.warning(f"Timeout ao buscar senador {cod_senador} na API")
+            return False
+        except requests.exceptions.HTTPError as e:
+            status_code = response.status_code if response is not None else 0
+            if status_code == 404:
+                logging.warning(f"Senador {cod_senador} não encontrado na API (404)")
+            else:
+                logging.warning(f"Erro HTTP ao buscar senador {cod_senador}: {e}")
+            return False
         except Exception as e:
-            logging.warning(f"Não foi possível buscar mandatos do senador {cod_senador}: {e}")
-        
-        logging.info(f"Senador {cod_senador} ({nome_parlamentar}) inserido via API.")
-        return True
-        
-    except requests.exceptions.Timeout:
-        logging.warning(f"Timeout ao buscar senador {cod_senador} na API")
+            logging.warning(f"Erro ao buscar senador {cod_senador} na API: {e}")
+            return False
+    
+    # Navega na estrutura do JSON
+    parlamentar = (
+        data.get("DetalheParlamentar", {})
+        .get("Parlamentar", {})
+    )
+    
+    if not parlamentar:
+        logging.warning(f"API não retornou dados para o senador {cod_senador}")
         return False
-    except requests.exceptions.HTTPError as e:
-        if response.status_code == 404:
-            logging.warning(f"Senador {cod_senador} não encontrado na API (404)")
-        else:
-            logging.warning(f"Erro HTTP ao buscar senador {cod_senador}: {e}")
+    
+    ident = parlamentar.get("IdentificacaoParlamentar", {})
+    
+    codigo = int(ident.get("CodigoParlamentar", 0))
+    if not codigo or codigo != cod_senador:
+        logging.warning(f"Código retornado pela API ({codigo}) não corresponde ao solicitado ({cod_senador})")
         return False
+    
+    nome_parlamentar = ident.get("NomeParlamentar", "").strip()
+    nome_completo = ident.get("NomeCompletoParlamentar", "").strip()
+    sexo = ident.get("SexoParlamentar", "")
+    sigla_partido = ident.get("SiglaPartidoParlamentar", "")
+    uf = ident.get("UfParlamentar", "")
+    url_foto = ident.get("UrlFotoParlamentar", "")
+    url_pagina = ident.get("UrlPaginaParlamentar", "")
+    email = ident.get("EmailParlamentar", "")
+    
+    if not nome_parlamentar:
+        nome_parlamentar = f"Senador {cod_senador}"
+    
+    # 1. Insere/ignora parlamentar
+    cursor.execute("""
+        INSERT INTO senado.parlamentar
+            (codigo, nome_parlamentar, nome_completo, sexo,
+             sigla_partido, uf, url_foto, url_pagina, email)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (codigo) DO NOTHING
+    """, (codigo, nome_parlamentar, nome_completo, sexo,
+          sigla_partido, uf, url_foto, url_pagina, email))
+    
+    # 2. Tenta buscar mandatos em endpoint separado
+    try:
+        url_mandatos = f"https://legis.senado.leg.br/dadosabertos/senador/{cod_senador}/mandatos?v=5"
+        headers = {"accept": "application/json"}
+        senado_legis_limiter.acquire()
+        resp_mandatos = requests.get(url_mandatos, headers=headers, timeout=10)
+        if resp_mandatos.status_code == 200:
+            dados_mandatos = resp_mandatos.json()
+            mandatos = (
+                dados_mandatos.get("MandatoParlamentar", {})
+                .get("Parlamentar", {})
+                .get("Mandatos", {})
+                .get("Mandato", [])
+            )
+            if isinstance(mandatos, dict):
+                mandatos = [mandatos]
+            for mandato in mandatos:
+                codigo_mandato = mandato.get("CodigoMandato", "")
+                if codigo_mandato:
+                    uf_mandato = mandato.get("UfParlamentar", uf)
+                    descricao = mandato.get("DescricaoParticipacao", "")
+                    
+                    for leg_key in ["PrimeiraLegislaturaDoMandato", "SegundaLegislaturaDoMandato"]:
+                        leg_info = mandato.get(leg_key)
+                        if leg_info:
+                            num_leg = leg_info.get("NumeroLegislatura")
+                            data_inicio = leg_info.get("DataInicio")
+                            data_fim = leg_info.get("DataFim")
+                            if num_leg:
+                                cursor.execute("""
+                                    INSERT INTO senado.legislatura (numero, data_inicio, data_fim)
+                                    VALUES (%s, %s, %s)
+                                    ON CONFLICT (numero) DO NOTHING
+                                """, (num_leg, data_inicio, data_fim))
+                    
+                    prim_leg = mandato.get("PrimeiraLegislaturaDoMandato", {})
+                    seg_leg = mandato.get("SegundaLegislaturaDoMandato")
+                    primeira_leg = prim_leg.get("NumeroLegislatura", "") if prim_leg else ""
+                    segunda_leg = seg_leg.get("NumeroLegislatura", "") if seg_leg else ""
+
+                    if not primeira_leg or not primeira_leg.strip():
+                        logging.warning(
+                            f"Mandato {codigo_mandato} do senador {codigo} "
+                            f"ignorado (via API): primeira_legislatura vazia."
+                        )
+                        continue
+
+                    if segunda_leg is None:
+                        segunda_leg = ""
+
+                    cursor.execute("""
+                        INSERT INTO senado.mandato
+                            (codigo_mandato, codigo_parlamentar, uf,
+                             descricao_participacao,
+                             primeira_legislatura, segunda_legislatura)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (codigo_mandato, codigo_parlamentar) DO NOTHING
+                    """, (codigo_mandato, codigo, uf_mandato,
+                          descricao, primeira_leg, segunda_leg))
     except Exception as e:
-        logging.warning(f"Erro ao buscar senador {cod_senador} na API: {e}")
-        return False
-    finally:
-        time.sleep(0.3)  # Rate limiting
+        logging.warning(f"Não foi possível buscar mandatos do senador {cod_senador}: {e}")
+    
+    logging.info(f"Senador {cod_senador} ({nome_parlamentar}) inserido via API.")
+    return True
 
 
 # Cache para evitar chamadas repetidas à API de detalhes de deputados
@@ -433,7 +448,7 @@ def import_senadores_senado(conn) -> bool:
                          descricao_participacao,
                          primeira_legislatura, segunda_legislatura)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (codigo_mandato) DO NOTHING
+                    ON CONFLICT (codigo_mandato, codigo_parlamentar) DO NOTHING
                 """, (codigo_mandato, codigo, uf_mandato,
                       descricao, primeira_leg, segunda_leg))
 

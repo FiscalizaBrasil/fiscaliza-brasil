@@ -1464,7 +1464,27 @@ def get_estatisticas_despesas(legislatura: int):
             query_mensal += " GROUP BY d.ano, d.mes ORDER BY d.ano DESC, d.mes DESC LIMIT 12"
             cursor.execute(query_mensal, tuple(params_mensal))
             gastos_mensais = [{"ano": r[0], "mes": r[1], "valor": float(r[2])} for r in cursor.fetchall()]
-            
+
+            # 2b. Evolução de Gastos (todos os meses da legislatura ou anual quando legislatura=0)
+            if legislatura:
+                query_evolucao = """
+                    SELECT d.ano, d.mes as mes, SUM(d.valor_documento) as valor
+                    FROM camara.deputados_despesas d
+                    JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
+                    WHERE m.legislatura_id = %s AND d.ano BETWEEN %s AND %s
+                    GROUP BY d.ano, d.mes ORDER BY d.ano ASC, d.mes ASC
+                """
+                params_evolucao = [legislatura, start_year, end_year]
+            else:
+                query_evolucao = """
+                    SELECT d.ano, 0 as mes, SUM(d.valor_documento) as valor
+                    FROM camara.deputados_despesas d
+                    GROUP BY d.ano ORDER BY d.ano ASC
+                """
+                params_evolucao = []
+            cursor.execute(query_evolucao, tuple(params_evolucao))
+            evolucao_gastos = [{"ano": r[0], "mes": r[1], "valor": float(r[2])} for r in cursor.fetchall()]
+
             # 3. Gastos por Estado
             query_estado = """
                 SELECT m.sigla_uf as estado, SUM(desp.valor_documento) as valor
@@ -1586,7 +1606,8 @@ def get_estatisticas_despesas(legislatura: int):
                 "gastos_por_mes": gastos_mensais,
                 "gastos_por_estado": gastos_estado,
                 "gastos_por_partido": gastos_partido,
-                "gastos_deputados": gastos_deputados
+                "gastos_deputados": gastos_deputados,
+                "evolucao_gastos": evolucao_gastos
             }
     except Exception as e:
         _log.error(f"Erro ao buscar estatísticas de despesas: {e}")

@@ -962,6 +962,38 @@ def get_despesas_estatisticas(legislatura: int):
             cursor.execute(query_evolucao, tuple(params))
             gastos_mensais = cursor.fetchall()
 
+            # 6b. Evolução de Gastos (todos os meses da legislatura ou anual quando legislatura=0)
+            if legislatura:
+                query_evolucao_gastos = f"""
+                    SELECT 
+                        d.ano AS ano,
+                        d.mes AS mes,
+                        SUM(d.valor_reembolsado) AS valor
+                    FROM senado.despesa_ceaps d
+                    {join_mandato}
+                    WHERE d.mes BETWEEN 1 AND 12
+                      AND make_date(d.ano, d.mes, 1) <= date_trunc('month', CURRENT_DATE)::date
+                      {where_leg}
+                    GROUP BY 1, 2
+                    ORDER BY 1 ASC, 2 ASC
+                """
+                cursor.execute(query_evolucao_gastos, tuple(params))
+                evolucao_gastos = [{"ano": r[0], "mes": r[1], "valor": float(r[2])} for r in cursor.fetchall()]
+            else:
+                query_evolucao_gastos = """
+                    SELECT 
+                        d.ano AS ano,
+                        0 AS mes,
+                        SUM(d.valor_reembolsado) AS valor
+                    FROM senado.despesa_ceaps d
+                    WHERE d.mes BETWEEN 1 AND 12
+                      AND make_date(d.ano, d.mes, 1) <= date_trunc('month', CURRENT_DATE)::date
+                    GROUP BY 1
+                    ORDER BY 1 ASC
+                """
+                cursor.execute(query_evolucao_gastos)
+                evolucao_gastos = [{"ano": r[0], "mes": r[1], "valor": float(r[2])} for r in cursor.fetchall()]
+
             # 7. Total 12 meses (sempre global ou por legislatura?) 
             # Mantendo global para contexto, ou filtrando se legislatura ativa 
             query_12m = f"""
@@ -1006,7 +1038,8 @@ def get_despesas_estatisticas(legislatura: int):
                         "total": float(r[5])
                     }
                     for r in top_10
-                ]
+                ],
+                "evolucao_gastos": evolucao_gastos
             }
     except Exception as e:
         _log.error(f"Erro ao buscar estatísticas de despesas: {e}")

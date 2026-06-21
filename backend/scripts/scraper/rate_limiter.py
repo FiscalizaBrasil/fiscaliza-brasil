@@ -41,7 +41,7 @@ class RateLimiter:
 camara_limiter = RateLimiter(max_rate=10)           # dadosabertos.camara.leg.br
 senado_legis_limiter = RateLimiter(max_rate=5)       # legis.senado.leg.br
 senado_adm_limiter = RateLimiter(max_rate=1)         # adm.senado.gov.br
-portal_limiter = RateLimiter(max_rate=10)            # api.portaldatransparencia.gov.br
+portal_limiter = RateLimiter(max_rate=5)             # api.portaldatransparencia.gov.br
 
 
 def get_limiter_for_url(url: str) -> RateLimiter:
