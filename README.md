@@ -1,207 +1,117 @@
-# tcc-I
+# Fiscaliza Brasil
 
-Projeto de TCC: API de Deputados (backend) e frontend em Vite + Vue.
+Plataforma de transparência de dados do Congresso Nacional: Câmara dos Deputados e Senado Federal.
 
-Este repositório contém um backend em Python (FastAPI) e um frontend em TypeScript (Vite + Vue).
+Backend em Python (FastAPI) + frontend em TypeScript (Vue 3) + PostgreSQL.
 
-Este README descreve como configurar e executar o backend localmente, como preparar o banco de dados e exemplos de uso dos endpoints.
+## Como executar
 
-## Sumário
+### Com Docker (recomendado)
 
-- Requisitos
-- Estrutura do repositório
-- Configuração (.env)
-- Instalação e execução (Windows / PowerShell)
-- Endpoints principais
-- Testes rápidos (PowerShell)
-- Notas sobre o banco de dados
-- Sugestões e melhorias
+```bash
+docker compose up -d
+```
 
----
+Isso sobe o PostgreSQL, executa `init_db.py` (cria as tabelas), inicia o backend na porta `8000` e o frontend na `5173`.
 
-## Requisitos
+A primeira execução pode demorar alguns minutos: o backend baixa fotos, importa dados cacheados e inicia os scrapers em background.
 
-- Python 3.8+ (recomendado 3.10+)
-- PostgreSQL (com a base de dados e tabela `deputados` criada)
-- Git (opcional)
+### Sem Docker (desenvolvimento local)
 
-Dependências Python principais (instaladas via pip):
+**Backend:**
 
-- python-dotenv
-- psycopg2-binary
-- fastapi
-- uvicorn
-- APScheduler
+```bash
+cd backend
+pip install -r ../requirements.txt
+python scripts/init_db.py
+python main.py
+```
 
-O arquivo `requirements.txt` na raiz do projeto já inclui todas as dependências necessárias, incluindo `fastapi`, `uvicorn` e `APScheduler`.
+**Frontend:**
 
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
 
-## Estrutura do repositório
+### Variáveis de ambiente
 
-Estrutura relevante:
+O `db.py` usa `load_dotenv()` e lê o `.env` do diretório de trabalho atual.
 
-- `backend/`
-	- `main.py` - instância FastAPI e configuração CORS
-	- `api/deputados/router.py` - endpoints relacionados a deputados
-	- `database/db.py` - conexão com PostgreSQL (usa python-dotenv)
-- `frontend/` - app frontend (Vite + Vue)
-- `requirements.txt` - dependências Python listadas
-
-## Configuração (.env)
-
-Crie um arquivo `.env` na pasta `backend/` com as seguintes variáveis (exemplo):
+- **Com Docker**: o compose injeta `DATABASE_URL` diretamente.
+- **Local**: crie um `.env` dentro de `backend/` com:
 
 ```
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=pgdb
+DB_NAME=fiscaliza_db
 DB_USER=postgres
-DB_PASSWORD=pgpwd
+DB_PASSWORD=postgres
 ```
 
-Altere os valores conforme sua instalação do PostgreSQL.
+O `.env` na raiz do projeto contém apenas `API_KEY` (Portal da Transparência) — usado pelo Docker Compose.
 
-## Instalação e execução (Windows / PowerShell)
+## Estrutura
 
-Abra um PowerShell na pasta do projeto e siga estes passos (exemplo assume que você está dentro de `backend\`):
-
-1. Criar e ativar virtualenv
-
-```powershell
-Set-Location -Path 'C:\Users\Bene\Desktop\Codes\tcc-I\backend'
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-# Se a política de execução bloquear, rode (uma vez):
-# Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+backend/
+  main.py                  # FastAPI app, CORS, lifespan (scrapers)
+  api/
+    camara/router.py       # Endpoints da Câmara (/api/camara)
+    senado/router.py       # Endpoints do Senado (/api/senado)
+    portal/router.py       # Emendas do Portal da Transparência (/api/portal)
+  database/
+    db.py                  # Pool de conexões PostgreSQL (ThreadedConnectionPool)
+    cache.py               # Cache TTL em memória
+    utils.py               # Funções auxiliares (legislatura, fotos)
+  scripts/
+    init_db.py             # Cria schemas/tabelas (camara, senado, portal)
+    import_data.py         # Importa JSONs cacheados de backend/data/
+    scraper/               # Scrapers que buscam dados das APIs oficiais
+frontend/
+  src/
+    pages/                 # Páginas Vue (Home, Camara, Senado, etc.)
+    stores/                # Pinia stores (camara.ts, senado.ts)
+    services/api.ts        # Configuração da URL da API
+    router/                # Vue Router
 ```
 
-2. Instalar dependências
+## Endpoints
 
-```powershell
-pip install -r ..\requirements.txt
-```
+A documentação completa está em [README_API.md](README_API.md). O FastAPI também gera Swagger automático em `http://localhost:8000/docs`.
 
-3. Criar `.env` conforme mostrado na seção anterior (na pasta `backend/`).
+**Câmara:** `/api/camara/{legislatura}/lista`, `/api/camara/{legislatura}/estatisticas`, `/api/camara/{id}`, `/api/camara/comparar`, etc.
 
-4. Rodar o servidor (modo desenvolvimento com reload)
+**Senado:** `/api/senado/{legislatura}/lista`, `/api/senado/{legislatura}/estatisticas`, `/api/senado/{codigo}`, `/api/senado/comparar`, etc.
 
-```powershell
-uvicorn main:app --reload --host 127.0.0.1 --port 8000
-```
+**Outros:** `/api/scraping-status`, `/api/cache-stats`, `/api/cache-invalidate`.
 
-O servidor deve ficar acessível em `http://127.0.0.1:8000`.
+## Banco de dados
 
-### Comandos rápidos (resumo)
+Três schemas no PostgreSQL:
 
-Backend (PowerShell):
+| Schema    | Conteúdo                                          |
+|-----------|---------------------------------------------------|
+| `camara`  | Deputados, mandatos, despesas, proposições, votos  |
+| `senado`  | Senadores, mandatos, despesas, matérias, autorias  |
+| `portal`  | Emendas parlamentares do Portal da Transparência   |
 
-```powershell
-# entrar na pasta backend
-Set-Location -Path 'C:\Users\Bene\Desktop\Codes\tcc-I\backend'
+As tabelas são criadas automaticamente pelo `scripts/init_db.py` (executado na inicialização). Migrações de colunas são feitas via blocos `DO $$` inline — não há framework de migração.
 
-# criar e ativar venv
-python -m venv .venv
-.venv\Scripts\Activate.ps1
+## Fluxo de dados
 
-# instalar deps
-pip install -r ..\requirements.txt
+1. O backend inicia e roda `init_db.py` para garantir que as tabelas existem.
+2. Em seguida, `import_data.py` lê arquivos JSON cacheados em `backend/data/` (gitignorado) e popula o banco.
+3. Scrapers em background começam a buscar dados novos das APIs oficiais:
+   - Câmara: `dadosabertos.camara.leg.br`
+   - Senado: `legis.senado.leg.br` e `adm.senado.gov.br`
+   - Portal da Transparência: `api.portaldatransparencia.gov.br`
 
-# criar .env (editar valores conforme necessário)
-# New-Item -Path . -Name '.env' -ItemType 'file' -Value 'DB_HOST=localhost`nDB_PORT=5432`nDB_NAME=pgdb`nDB_USER=postgres`nDB_PASSWORD=pgpwd'
+Os scrapers rodam continuamente com rate limits específicos (Câmara 10 req/s, Senado Legis 5 req/s, Senado ADM 1 req/s, Portal 5 req/s).
 
-# rodar servidor
-uvicorn main:app --reload --host 127.0.0.1 --port 8000
-```
+## Troubleshooting
 
-Frontend (dentro da pasta `frontend/`):
-
-```powershell
-# entrar na pasta frontend
-Set-Location -Path 'C:\Users\Bene\Desktop\Codes\tcc-I\frontend'
-
-# instalar dependências (escolha um gerenciador)
-# npm
-npm install
-# ou pnpm
-pnpm install
-# ou yarn
-yarn install
-
-# rodar em modo dev (Vite)
-# npm
-npm run dev
-# ou pnpm
-pnpm dev
-# ou yarn
-yarn dev
-```
-
-> Nota: o frontend por padrão espera o backend rodando em http://localhost:5173 no CORS do backend há uma configuração que já permite `http://localhost:5173`.
-
-## Endpoints principais
-
-- GET `/` — rota raiz; retorna: `{ "message": "API de Deputados em funcionamento" }`
-- GET `/api/deputados/buscar?nome=...` — busca deputados pelo nome (parâmetro `nome`, min_length=2). Retorna `{ "resultados": [...] }`.
-- GET `/api/deputados/{id}` — retorna perfil detalhado do deputado com o `id` informado.
-
-Observação: os endpoints dependem de uma conexão válida ao banco de dados configurado no `.env`.
-
-## Testes rápidos (PowerShell)
-
-Com o servidor rodando, você pode testar com `Invoke-RestMethod`:
-
-```powershell
-# checar raiz
-Invoke-RestMethod -Uri http://127.0.0.1:8000/ -Method Get
-
-# buscar deputados por nome
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/deputados/buscar?nome=Silva" -Method Get
-
-# obter perfil por id
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/deputados/1" -Method Get
-```
-
-## Notas sobre o banco de dados
-
-- `backend/database/db.py` usa `python-dotenv` para ler variáveis de ambiente do `.env` e `psycopg2` para conectar ao PostgreSQL.
-- A API assume que existe uma tabela `deputados` com colunas como `id`, `nome_civil`, `uf_nascimento`, `email`, `data_nascimento`, `escolaridade`, `municipio_nascimento`.
-- Se você não tiver a tabela, as requisições retornarão arrays vazios ou 404 para IDs não existentes.
-
-Exemplo mínimo de DDL (só referência — ajuste tipos e restrições conforme necessário):
-
-```sql
-CREATE TABLE deputados (
-	id SERIAL PRIMARY KEY,
-	nome_civil TEXT,
-	email TEXT,
-	data_nascimento DATE,
-	escolaridade TEXT,
-	uf_nascimento TEXT,
-	municipio_nascimento TEXT
-);
-```
-
-## Sugestões e melhorias
-
-- Adicionar `fastapi` e `uvicorn` ao `requirements.txt` para facilitar instalação.
-- Adicionar `README` específico dentro de `backend/` e `frontend/` com instruções separadas.
-- Criar um arquivo `backend/.env.example` com as variáveis necessárias.
-- Adicionar scripts automatizados (ex.: `run-backend.ps1`) que ativem o venv e iniciem o uvicorn.
-
-## Ajuda / Troubleshooting
-
-- **ModuleNotFoundError: No module named 'apscheduler'**:
-  - **No Docker**: Certifique-se de que o venv está ativo e rode `pip install -r ..\requirements.txt`.
-  - **No Docker**: Rode `docker compose build backend` seguido de `docker compose up -d` para garantir que a imagem foi construída com as novas dependências.
-- Erro de conexão ao banco: verifique `.env`, se o PostgreSQL está em execução e se o usuário/ senha/ host/ porta estão corretos.
-- Erro de import (psycopg2): execute `pip install psycopg2-binary` no venv.
-- Se houver mensagens de CORS no frontend, verifique `origins` em `backend/main.py` e ajuste conforme o `host:port` do frontend.
-
-Se quiser, eu posso:
-- adicionar `backend/.env.example` automaticamente,
-- inserir `fastapi` e `uvicorn` no `requirements.txt`,
-- criar um script `run-backend.ps1` para rodar tudo automaticamente.
-
----
-
-Obrigado — me diga se quer que eu gere os arquivos auxiliares (`.env.example`, `run-backend.ps1`) agora.
+- **Erro de conexão ao banco**: verifique se o PostgreSQL está rodando e o `.env` está correto.
+- **CORS no frontend**: o backend só permite `localhost:5173`. Verifique se o frontend está rodando nessa porta.
+- **`ModuleNotFoundError`**: ative o venv e reinstale as dependências (`pip install -r requirements.txt`).
