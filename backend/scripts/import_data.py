@@ -1871,8 +1871,9 @@ def _parse_br_number(valor) -> float:
     if not isinstance(valor, str) or not valor.strip():
         return 0.0
     try:
-        # Remove pontos (separador de milhar) e troca vírgula por ponto
-        return float(valor.replace(".", "").replace(",", "."))
+        # Remove whitespace e converte formato brasileiro (ex: '- 15.300.000,00') para float
+        s = "".join(valor.split())
+        return float(s.replace(".", "").replace(",", "."))
     except (ValueError, TypeError):
         logger.warning(f"Não foi possível converter valor '{valor}' para número.")
         return 0.0
@@ -2030,6 +2031,9 @@ def import_emendas(conn, arquivo: str = None) -> Optional[bool]:
     
     if total_inseridos > 0 or arquivo is None:
         logging.info(f"Importação de emendas concluída. {total_inseridos} registros inseridos.")
+    elif any(v > 0 for v in json_counts_by_prefix.values()):
+        logging.info("Importação de emendas concluída (dados já estavam sincronizados).")
+        return True
     return True if total_inseridos > 0 else None
 
 

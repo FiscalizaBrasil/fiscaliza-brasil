@@ -1378,7 +1378,7 @@ def get_resumo_principal_camara(legislatura: int = 0):
     """
     Retorna apenas o total de deputados e o total de gastos dos últimos 12 meses.
     Ideal para dashboards e página inicial.
-    Se legislatura não for informada, usa a maior legislatura disponível no banco.
+    Se legislatura não for informada (ou for 0), retorna dados de todas as legislaturas.
     """
     conn = None
     try:
@@ -1386,32 +1386,31 @@ def get_resumo_principal_camara(legislatura: int = 0):
         if not conn:
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
-        # Se legislatura não foi informada, busca a maior disponível
-        if not legislatura or legislatura <= 0:
+        # Se legislatura não foi informada (ou é 0), considera todas
+        usar_legislatura = legislatura if (legislatura and legislatura > 0) else None
+        
+        if not usar_legislatura:
             with conn.cursor() as cursor:
-                maior_leg = get_maior_legislatura_camara(conn)
-            
-            if maior_leg is None:
-                return {
-                    "total_parlamentares": 0,
-                    "gastos_12_meses": 0.0,
-                    "db_vazio": True
-                }
-            legislatura = maior_leg
+                cursor.execute("SELECT COUNT(*) FROM camara.deputados_mandatos")
+                if cursor.fetchone()[0] == 0:
+                    return {
+                        "total_parlamentares": 0,
+                        "gastos_12_meses": 0.0,
+                        "db_vazio": True
+                    }
         
         with conn.cursor() as cursor:
             # 1. Total de deputados (titulares e efetivados)
             query_total = "SELECT COUNT(DISTINCT deputado_id) FROM camara.deputados_mandatos WHERE condicao_eleitoral IN ('Titular', 'Efetivado')"
             params_total = []
-            if legislatura and legislatura > 0:
+            if usar_legislatura:
                 query_total += " AND legislatura_id = %s"
-                params_total.append(legislatura)
+                params_total.append(usar_legislatura)
             
             cursor.execute(query_total, tuple(params_total))
             total_deputados = cursor.fetchone()[0] or 0
 
             # 2. Gastos dos últimos 12 meses
-            # Como a tabela de despesas tem ano e mês separados, fazemos o filtro por data
             query_gastos = """
                 SELECT COALESCE(SUM(d.valor_documento), 0)
                 FROM camara.deputados_despesas d
@@ -1419,7 +1418,7 @@ def get_resumo_principal_camara(legislatura: int = 0):
                       >= (CURRENT_DATE - INTERVAL '12 months')
             """
             params_gastos = []
-            if legislatura and legislatura > 0:
+            if usar_legislatura:
                 query_gastos = """
                     SELECT COALESCE(SUM(d.valor_documento), 0)
                     FROM camara.deputados_despesas d
@@ -1428,7 +1427,7 @@ def get_resumo_principal_camara(legislatura: int = 0):
                       AND TO_DATE(d.ano || '-' || LPAD(d.mes::text, 2, '0'), 'YYYY-MM')
                           >= (CURRENT_DATE - INTERVAL '12 months')
                 """
-                params_gastos.append(legislatura)
+                params_gastos.append(usar_legislatura)
             
             cursor.execute(query_gastos, tuple(params_gastos))
             gastos_12_meses = float(cursor.fetchone()[0] or 0)
