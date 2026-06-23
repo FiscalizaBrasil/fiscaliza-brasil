@@ -71,21 +71,23 @@ backend/
     scraper/               # Scrapers que buscam dados das APIs oficiais
 frontend/
   src/
-    pages/                 # Páginas Vue (Home, Camara, Senado, etc.)
-    stores/                # Pinia stores (camara.ts, senado.ts)
+    pages/                 # Páginas Vue (Home, Analise, Metodologia, Camara, Senado)
+    components/            # Componentes UI reutilizáveis (shadcn-vue)
+    stores/                # Pinia stores (camara.ts, senado.ts, loading.ts)
     services/api.ts        # Configuração da URL da API
     router/                # Vue Router
+    lib/                   # Utilitários (clsx, etc.)
 ```
 
 ## Endpoints
 
 A documentação completa está em [README_API.md](README_API.md). O FastAPI também gera Swagger automático em `http://localhost:8000/docs`.
 
-**Câmara:** `/api/camara/{legislatura}/lista`, `/api/camara/{legislatura}/estatisticas`, `/api/camara/{id}`, `/api/camara/comparar`, etc.
+**Câmara:** `/api/camara/{legislatura}/lista`, `/api/camara/{legislatura}/estatisticas`, `/api/camara/{legislatura}/{deputado_id}`, `/api/camara/{legislatura}/comparar`, `/api/camara/{legislatura}/despesas/evolucao`, `/api/camara/{legislatura}/despesas/estatisticas`, `/api/camara/{legislatura}/empresas/estatisticas`, `/api/camara/{legislatura}/emendas`, `/api/camara/{legislatura}/proposicoes`, `/api/camara/legislaturas`, `/api/camara/resumo-principal`.
 
-**Senado:** `/api/senado/{legislatura}/lista`, `/api/senado/{legislatura}/estatisticas`, `/api/senado/{codigo}`, `/api/senado/comparar`, etc.
+**Senado:** `/api/senado/{legislatura}/lista`, `/api/senado/{legislatura}/estatisticas`, `/api/senado/{legislatura}/{senador_codigo}`, `/api/senado/{legislatura}/comparar`, `/api/senado/{legislatura}/despesas/evolucao`, `/api/senado/{legislatura}/despesas/estatisticas`, `/api/senado/{legislatura}/empresas/estatisticas`, `/api/senado/{legislatura}/emendas`, `/api/senado/{legislatura}/materia/listar`, `/api/senado/legislaturas`, `/api/senado/resumo-principal`.
 
-**Outros:** `/api/scraping-status`, `/api/cache-stats`, `/api/cache-invalidate`.
+**Outros:** `/api/scraping-status`, `/api/cache-stats`, `/api/cache-invalidate`, `/api/portal/emendas`.
 
 ## Banco de dados
 
@@ -113,5 +115,5 @@ Os scrapers rodam continuamente com rate limits específicos (Câmara 10 req/s, 
 ## Troubleshooting
 
 - **Erro de conexão ao banco**: verifique se o PostgreSQL está rodando e o `.env` está correto.
-- **CORS no frontend**: o backend só permite `localhost:5173`. Verifique se o frontend está rodando nessa porta.
+- **CORS no frontend**: o backend só permite `localhost:5173` e `127.0.0.1:5173`. Se estiver rodando em outra porta, ajuste o `origins` em `main.py`.
 - **`ModuleNotFoundError`**: ative o venv e reinstale as dependências (`pip install -r requirements.txt`).
