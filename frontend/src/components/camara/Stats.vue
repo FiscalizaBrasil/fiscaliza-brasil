@@ -155,7 +155,7 @@ ChartJS.register(BarElement, CategoryScale, LinearScale, BarController, Tooltip,
 const store = useCamaraStore()
 
 onMounted(() => {
-  store.fetchEstatisticasGerais()
+  store.fetchEvolucaoGastos()
   store.fetchEstatisticasDeputados()
   if (store.deputadosList.length === 0) {
     store.fetchDeputados()
@@ -178,7 +178,7 @@ const totalUfs = computed(() => {
   return store.estadosUnicos.length
 })
 
-const evolucao = computed(() => store.generalStats?.evolucao_gastos ?? [])
+const evolucao = computed(() => store.evolucaoGastos)
 
 const legislaturaSelecionada = computed(() => store.legislatura)
 
@@ -325,9 +325,9 @@ watch(isModoMensal, (mensal) => {
   }
 }, { immediate: true })
 
-// Reload stats when legislatura changes
+// Reload evolution data when legislatura changes
 watch(legislaturaSelecionada, () => {
-  store.fetchEstatisticasGerais()
+  store.fetchEvolucaoGastos()
 })
 
 const topPartidos = computed(() => {

@@ -148,7 +148,7 @@
                         <td class="text-center px-4 py-2">
                           <div class="flex justify-center">
                             <img 
-                              :src="`https://www.camara.leg.br/internet/deputado/bandep/${voto.deputado_id}.jpg`" 
+                              :src="voto.foto || `https://www.camara.leg.br/internet/deputado/bandep/${voto.deputado_id}.jpg`" 
                               :alt="voto.nome"
                               class="h-8 w-8 rounded-full object-cover border border-border"
                               loading="lazy"

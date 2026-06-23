@@ -823,7 +823,8 @@ def get_votos_proposicao(legislatura: int, proposicao_id: int):
                 votacoes_dict[vot_id]["lista_votos"].append({
                     "deputado_id": r[3],
                     "nome": r[4],
-                    "voto": r[5]
+                    "voto": r[5],
+                    "foto": get_foto_url_camara(r[3], f"https://www.camara.leg.br/internet/deputado/bandep/{r[3]}.jpg")
                 })
                 votacoes_dict[vot_id]["total_votos"] += 1
 
@@ -855,7 +856,8 @@ def get_todos_deputados(
                     d.id, 
                     d.nome_civil,
                     m.sigla_partido,
-                    m.sigla_uf as uf
+                    m.sigla_uf as uf,
+                    m.url_foto
                 FROM camara.deputados d
                 INNER JOIN camara.deputados_mandatos m ON d.id = m.deputado_id
                 WHERE m.sigla_uf IS NOT NULL
@@ -879,7 +881,8 @@ def get_todos_deputados(
                     "id": r[0],
                     "nome_civil": r[1],
                     "sigla_partido": r[2] if r[2] else "S/P",
-                    "uf": r[3]
+                    "uf": r[3],
+                    "foto": get_foto_url_camara(r[0], r[4])
                 }
                 for r in res
             ]
@@ -1402,6 +1405,47 @@ def get_emendas_deputado(legislatura: int, deputado_id: int, pagina: int = Query
         if conn:
             db.release_db_connection(conn)
 
+@router.get("/{legislatura}/despesas/evolucao", summary="Obtém a evolução de gastos da Câmara (mensal ou anual)")
+@ttl_cache(maxsize=16, ttl=300, cache_name="camara_despesas_evolucao")
+def get_evolucao_despesas(legislatura: int):
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
+
+        with conn.cursor() as cursor:
+            if legislatura:
+                start_year = 2023 - (57 - legislatura) * 4
+                end_year = start_year + 3
+                cursor.execute("""
+                    SELECT d.ano, d.mes, SUM(d.valor_documento) as valor
+                    FROM camara.deputados_despesas d
+                    JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
+                    WHERE m.legislatura_id = %s AND d.ano BETWEEN %s AND %s
+                    GROUP BY d.ano, d.mes ORDER BY d.ano ASC, d.mes ASC
+                """, (legislatura, start_year, end_year))
+            else:
+                cursor.execute("""
+                    SELECT d.ano, 0 as mes, SUM(d.valor_documento) as valor
+                    FROM camara.deputados_despesas d
+                    GROUP BY d.ano ORDER BY d.ano ASC
+                """)
+
+            return {
+                "evolucao_gastos": [
+                    {"ano": r[0], "mes": r[1], "valor": float(r[2])}
+                    for r in cursor.fetchall()
+                ]
+            }
+    except Exception as e:
+        _log.error(f"Erro ao buscar evolução de gastos: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao processar evolução de gastos")
+    finally:
+        if conn:
+            db.release_db_connection(conn)
+
+
 @router.get("/{legislatura}/despesas/estatisticas", summary="Obtém o panorama geral de gastos da Câmara")
 @ttl_cache(maxsize=16, ttl=300, cache_name="camara_despesas_estatisticas")
 def get_estatisticas_despesas(legislatura: int):
@@ -1592,7 +1636,8 @@ def get_estatisticas_despesas(legislatura: int):
             gastos_deputados = [
                 {
                     "deputado_id": r[0], "nome_civil": r[1], "sigla_partido": r[2],
-                    "estado": r[3], "total_gasto": float(r[4])
+                    "estado": r[3], "total_gasto": float(r[4]),
+                    "foto": get_foto_url_camara(r[0], f"https://www.camara.leg.br/internet/deputado/bandep/{r[0]}.jpg")
                 } 
                 for r in gastos_dep_raw
             ]

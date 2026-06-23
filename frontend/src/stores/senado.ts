@@ -1,5 +1,6 @@
 import { defineStore } from "pinia"
 import { ref, computed } from "vue"
+import { absolutizeFoto } from "@/lib/foto"
 
 export interface Senador {
     id: number
@@ -116,7 +117,7 @@ export const useSenadoStore = defineStore("senado", () => {
     // Refetch senator-specific data
     await Promise.allSettled([
         fetchSenadores(),
-        fetchEstatisticasGerais(),
+        fetchEvolucaoGastos(),
         fetchEstatisticasSenadores(),
         fetchProjetosLegislativos()
     ])
@@ -170,6 +171,7 @@ export const useSenadoStore = defineStore("senado", () => {
 
     // General Stats state
     const generalStats = ref<EstatisticasSenado | null>(null)
+    const evolucaoGastos = ref<{ ano: number; mes: number; valor: number }[]>([])
     const senadorStats = ref<EstatisticasSenadoGerais | null>(null)
 
     // Projetos Legislativos state
@@ -261,7 +263,7 @@ export const useSenadoStore = defineStore("senado", () => {
                 nome: s.nomeParlamentar,
                 partido: s.siglaPartido,
                 estado: s.uf,
-                foto: s.urlFoto
+                foto: absolutizeFoto(s.urlFoto)
             }))
         } catch (e: any) {
             console.error("Erro ao buscar senadores:", e)
@@ -308,7 +310,7 @@ export const useSenadoStore = defineStore("senado", () => {
                 municipio_nascimento: "N/A",
                 sigla_partido: s.siglaPartido,
                 uf: s.uf,
-                foto: s.urlFoto,
+                foto: absolutizeFoto(s.urlFoto),
                 total_emendas: s.total_emendas || 0,
                 legislaturas_ativas: s.legislaturas_ativas || []
             }
@@ -367,6 +369,28 @@ export const useSenadoStore = defineStore("senado", () => {
         } catch (e: any) {
             console.error('Erro ao buscar estatísticas do senado:', e)
             error.value = "Não foi possível carregar as estatísticas do Senado."
+            generalStats.value = {
+                total_gastos: 0,
+                media_por_senador: 0,
+                total_12_meses: 0,
+                gastos_por_mes: [],
+                partidos: [],
+                categorias: [],
+                top_10: [],
+                evolucao_gastos: [],
+            }
+        }
+    }
+
+    const fetchEvolucaoGastos = async () => {
+        try {
+            const response = await fetch(`${apiUrl}/api/senado/${legislatura.value}/despesas/evolucao`)
+            if (!response.ok) throw new Error("Falha ao buscar evolução de gastos")
+            const data = await response.json()
+            evolucaoGastos.value = data.evolucao_gastos || []
+        } catch (e: any) {
+            console.error("Erro ao buscar evolução de gastos:", e)
+            evolucaoGastos.value = []
         }
     }
 
@@ -578,6 +602,7 @@ export const useSenadoStore = defineStore("senado", () => {
         loadingDespesas,
         loadingEmendas,
         generalStats,
+        evolucaoGastos,
         senadorStats,
         loadingStats,
         fetchSenadores,
@@ -585,6 +610,7 @@ export const useSenadoStore = defineStore("senado", () => {
         fetchDespesasSenador,
         fetchEmendasSenador,
         fetchEstatisticasGerais,
+        fetchEvolucaoGastos,
         fetchEstatisticasSenadores,
         setFilter,
         setPage,

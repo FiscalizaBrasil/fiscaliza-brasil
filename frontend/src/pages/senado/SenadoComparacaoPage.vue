@@ -423,6 +423,7 @@ import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { useSenadoStore, type Senador, type SenadorDetail } from '@/stores/senado'
+import { absolutizeFoto } from '@/lib/foto'
 
 const store = useSenadoStore()
 
@@ -536,7 +537,7 @@ const compareSenadores = async () => {
         nome_parlamentar: senadorData.nomeParlamentar,
         sigla_partido: senadorData.siglaPartido,
         uf: senadorData.uf || fallbackUf || '',
-        foto: senadorData.urlFoto,
+        foto: absolutizeFoto(senadorData.urlFoto),
         total_gasto: totalGasto,
         categorias: categorias
       }

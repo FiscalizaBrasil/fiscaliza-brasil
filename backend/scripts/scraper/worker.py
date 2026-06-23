@@ -541,12 +541,13 @@ def _processar_com_importacao(config):
 
 def _processar_deputado(dep):
     dep_id = dep["id"]
-    anos = list(ANOS_PADRAO)
+    id_leg = dep.get("idLegislatura")
+    anos = _anos_legislatura(id_leg) if id_leg else list(ANOS_PADRAO)
     return _processar_com_importacao({
         'logger': log_camara,
-        'log_msg': "Baixando despesas do deputado %s (%s)",
-        'log_msg_args': (dep_id, dep.get("nome", "")),
-        'fetch': lambda: fetch_despesas_deputado(dep_id, anos=anos),
+        'log_msg': "Baixando despesas do deputado %s (%s) legislatura %s",
+        'log_msg_args': (dep_id, dep.get("nome", ""), id_leg or "N/A"),
+        'fetch': lambda: fetch_despesas_deputado(dep_id, anos=anos, id_legislatura=id_leg),
         'import_fn': import_despesas_camara,
         'import_kwargs': {'deputado_id': dep_id},
         'item_key': f'deputado/{dep_id}',

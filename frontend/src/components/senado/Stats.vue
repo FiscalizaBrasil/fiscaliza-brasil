@@ -157,7 +157,7 @@ ChartJS.register(BarElement, CategoryScale, LinearScale, BarController, Tooltip,
 const store = useSenadoStore()
 
 onMounted(() => {
-  store.fetchEstatisticasGerais()
+  store.fetchEvolucaoGastos()
   store.fetchEstatisticasSenadores()
   if (store.senadoresList.length === 0) {
     store.fetchSenadores()
@@ -170,7 +170,7 @@ const mesesAbrev: Record<number, string> = {
   9: 'Set', 10: 'Out', 11: 'Nov', 12: 'Dez',
 }
 
-const evolucao = computed(() => store.generalStats?.evolucao_gastos ?? [])
+const evolucao = computed(() => store.evolucaoGastos)
 
 const legislaturaSelecionada = computed(() => store.legislatura)
 
@@ -309,8 +309,9 @@ watch(isModoMensal, (mensal) => {
   }
 }, { immediate: true })
 
+// Reload evolution data when legislatura changes
 watch(legislaturaSelecionada, () => {
-  store.fetchEstatisticasGerais()
+  store.fetchEvolucaoGastos()
 })
 
 const topPartidos = computed(() => {

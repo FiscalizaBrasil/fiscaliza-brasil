@@ -208,12 +208,21 @@
           </div>
         </section>
       </template>
+
+      <section v-else class="py-20 text-center">
+        <p class="text-lg text-muted-foreground">
+          Nenhum dado de despesas disponível para esta legislatura.
+        </p>
+        <p class="text-sm text-muted-foreground mt-2">
+          Os dados estão sendo coletados em segundo plano. Tente novamente em alguns minutos.
+        </p>
+      </section>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted} from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Banknote, Users, Receipt, ChevronRight } from 'lucide-vue-next'
 import BaseCard from '@/components/ui/BaseCard.vue'
@@ -351,4 +360,8 @@ const getStrokeColorClass = (index: number) => {
   ]
   return textColors[index % textColors.length]
 }
+
+watch(() => store.legislatura, () => {
+  store.fetchEstatisticasGerais()
+})
 </script>

@@ -845,6 +845,60 @@ def get_despesas_senador(legislatura: int, senador_codigo: int, pagina: int = 1)
         if conn:
             db.release_db_connection(conn)
 
+@router.get("/{legislatura}/despesas/evolucao", summary="Obtém a evolução de gastos do Senado (mensal ou anual)")
+@ttl_cache(maxsize=16, ttl=300, cache_name="senado_despesas_evolucao")
+def get_evolucao_despesas(legislatura: int):
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
+
+        with conn.cursor() as cursor:
+            if legislatura:
+                start_year = 2023 - (57 - legislatura) * 4
+                end_year = start_year + 3
+                where_leg = " AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
+                join_mandato = """
+                    INNER JOIN (
+                        SELECT DISTINCT codigo_parlamentar
+                        FROM senado.mandato
+                        WHERE primeira_legislatura::text = %s::text OR segunda_legislatura::text = %s::text
+                    ) m ON d.cod_senador = m.codigo_parlamentar
+                """
+                params = [legislatura, legislatura, start_year, end_year]
+                cursor.execute(f"""
+                    SELECT d.ano, d.mes, SUM(d.valor_reembolsado) as valor
+                    FROM senado.despesa_ceaps d
+                    {join_mandato}
+                    WHERE d.mes BETWEEN 1 AND 12
+                      AND make_date(d.ano, d.mes, 1) <= date_trunc('month', CURRENT_DATE)::date
+                      {where_leg}
+                    GROUP BY 1, 2 ORDER BY 1 ASC, 2 ASC
+                """, tuple(params))
+            else:
+                cursor.execute("""
+                    SELECT d.ano, 0 as mes, SUM(d.valor_reembolsado) as valor
+                    FROM senado.despesa_ceaps d
+                    WHERE d.mes BETWEEN 1 AND 12
+                      AND make_date(d.ano, d.mes, 1) <= date_trunc('month', CURRENT_DATE)::date
+                    GROUP BY 1 ORDER BY 1 ASC
+                """)
+
+            return {
+                "evolucao_gastos": [
+                    {"ano": r[0], "mes": r[1], "valor": float(r[2])}
+                    for r in cursor.fetchall()
+                ]
+            }
+    except Exception as e:
+        _log.error(f"Erro ao buscar evolução de gastos: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao processar evolução de gastos")
+    finally:
+        if conn:
+            db.release_db_connection(conn)
+
+
 @router.get("/{legislatura}/despesas/estatisticas")
 @ttl_cache(maxsize=16, ttl=300, cache_name="senado_despesas_estatisticas")
 def get_despesas_estatisticas(legislatura: int):

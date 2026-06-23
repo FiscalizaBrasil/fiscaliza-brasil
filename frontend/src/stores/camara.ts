@@ -1,5 +1,6 @@
 import { defineStore } from "pinia"
 import { ref, computed } from "vue"
+import { absolutizeFoto } from "@/lib/foto"
 
 export interface Deputado {
   id: number
@@ -82,6 +83,7 @@ export interface EstatisticasGerais {
     sigla_partido: string
     estado: string
     total_gasto: number
+    foto?: string
   }[]
   evolucao_gastos: { ano: number; mes: number; valor: number }[]
 }
@@ -110,6 +112,7 @@ export interface VotoDeputado {
   deputado_id: number
   nome: string
   voto: string
+  foto?: string
 }
 
 export interface Votacao {
@@ -198,6 +201,7 @@ export const useCamaraStore = defineStore("camara", () => {
 
   // General Stats state
   const generalStats = ref<EstatisticasGerais | null>(null)
+  const evolucaoGastos = ref<{ ano: number; mes: number; valor: number }[]>([])
   const deputadoStats = ref<EstatisticasDeputado | null>(null)
 
   // Categories state
@@ -304,7 +308,7 @@ export const useCamaraStore = defineStore("camara", () => {
         nome: d.nome_civil,
         partido: d.sigla_partido,
         estado: d.uf,
-        foto: `https://www.camara.leg.br/internet/deputado/bandep/${d.id}.jpg`
+        foto: absolutizeFoto(d.foto, `https://www.camara.leg.br/internet/deputado/bandep/${d.id}.jpg`)
       }))
     } catch (e: any) {
       console.error("Erro ao buscar deputados:", e)
@@ -333,6 +337,7 @@ export const useCamaraStore = defineStore("camara", () => {
       if (!response.ok) throw new Error("Falha ao buscar detalhes do deputado")
 
       const data = await response.json()
+      data.foto = absolutizeFoto(data.foto, `https://www.camara.leg.br/internet/deputado/bandep/${data.id}.jpg`)
       currentDeputado.value = data
       
       // Sincronizar legislatura exibida com o seletor
@@ -357,9 +362,39 @@ export const useCamaraStore = defineStore("camara", () => {
     try {
       const response = await fetch(`${apiUrl}/api/camara/${legislatura.value}/despesas/estatisticas`)
       if (!response.ok) throw new Error("Falha ao buscar estatísticas")
-      generalStats.value = await response.json()
+      const stats = await response.json()
+      if (stats.gastos_deputados) {
+        stats.gastos_deputados = stats.gastos_deputados.map((d: any) => ({
+          ...d,
+          foto: absolutizeFoto(d.foto, `https://www.camara.leg.br/internet/deputado/bandep/${d.deputado_id}.jpg`)
+        }))
+      }
+      generalStats.value = stats
     } catch (e: any) {
       console.error("Erro ao buscar estatísticas gerais de despesas:", e)
+      generalStats.value = {
+        total_gastos_12_meses: 0,
+        total_gastos: 0,
+        total_empresas_contratadas: 0,
+        gastos_por_categoria: [],
+        gastos_por_mes: [],
+        gastos_por_estado: [],
+        gastos_por_partido: [],
+        gastos_deputados: [],
+        evolucao_gastos: [],
+      }
+    }
+  }
+
+  const fetchEvolucaoGastos = async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/camara/${legislatura.value}/despesas/evolucao`)
+      if (!response.ok) throw new Error("Falha ao buscar evolução de gastos")
+      const data = await response.json()
+      evolucaoGastos.value = data.evolucao_gastos || []
+    } catch (e: any) {
+      console.error("Erro ao buscar evolução de gastos:", e)
+      evolucaoGastos.value = []
     }
   }
 
@@ -459,7 +494,17 @@ export const useCamaraStore = defineStore("camara", () => {
     try {
       const response = await fetch(`${apiUrl}/api/camara/${legislatura.value}/proposicoes/${id}/votos`)
       if (!response.ok) throw new Error("Falha ao buscar votos")
-      currentVotos.value = await response.json()
+      const votosData = await response.json()
+      if (votosData.historico_votacoes) {
+        votosData.historico_votacoes = votosData.historico_votacoes.map((v: any) => ({
+          ...v,
+          lista_votos: v.lista_votos?.map((dv: any) => ({
+            ...dv,
+            foto: absolutizeFoto(dv.foto, `https://www.camara.leg.br/internet/deputado/bandep/${dv.deputado_id}.jpg`)
+          }))
+        }))
+      }
+      currentVotos.value = votosData
     } catch (e: any) {
       console.error("Erro ao buscar votos do projeto legislativo:", e)
     } finally {
@@ -569,7 +614,7 @@ export const useCamaraStore = defineStore("camara", () => {
     // Invalidate/Refetch data
     await Promise.allSettled([
       fetchDeputados(),
-      fetchEstatisticasGerais(),
+      fetchEvolucaoGastos(),
       fetchEstatisticasDeputados(),
       fetchProjetosLegislativos(1)
     ])
@@ -611,6 +656,7 @@ export const useCamaraStore = defineStore("camara", () => {
     loadingDespesas,
     loadingEmendas,
     generalStats,
+    evolucaoGastos,
     deputadoStats,
     loadingStats,
     categorias,
@@ -620,6 +666,7 @@ export const useCamaraStore = defineStore("camara", () => {
     fetchDespesasDeputado,
     fetchEmendasDeputado,
     fetchEstatisticasGerais,
+    fetchEvolucaoGastos,
     fetchEstatisticasDeputados,
     projetosLegislativosList,
     totalProjetosLegislativos,

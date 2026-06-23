@@ -446,6 +446,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { useCamaraStore } from "@/stores/camara"
 import { type Deputado, type DeputadoDetail, type Despesa } from '@/stores/camara' // Assuming types are still needed from here or moved to a common types file
+import { absolutizeFoto } from '@/lib/foto'
 
 const store = useCamaraStore()
 
@@ -551,6 +552,7 @@ const compareDeputados = async () => {
     // O backend retorna uma lista com os dois deputados [depA, depB]
     const mapDeputadoComparacao = (depData: any, fallbackUf?: string): DeputadoComparacao => ({
       ...depData,
+      foto: absolutizeFoto(depData.foto, `https://www.camara.leg.br/internet/deputado/bandep/${depData.id}.jpg`),
       sigla_uf: depData.sigla_uf || fallbackUf || depData.uf_nascimento || '',
     })
 

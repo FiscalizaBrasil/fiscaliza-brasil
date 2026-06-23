@@ -601,17 +601,6 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
             
             try:
                 with conn.cursor() as cursor:
-                    # Verifica rapidamente se já existem despesas no banco para este deputado
-                    cursor.execute("""
-                        SELECT COUNT(*) FROM camara.deputados_despesas 
-                        WHERE mandato_id IN (
-                            SELECT id FROM camara.deputados_mandatos WHERE deputado_id = %s
-                        )
-                    """, (dep_id,))
-                    if cursor.fetchone()[0] > 0:
-                        _despesas_camara_importadas.add(dep_id)
-                        continue  # Já importado anteriormente, pula
-                    
                     # Pré-busca todos os mandatos do deputado com seu período (ano início)
                     cursor.execute("""
                         SELECT m.id, m.legislatura_id, 
@@ -684,7 +673,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                             if y not in mandato_por_ano:
                                 mandato_por_ano[y] = m_id
                     
-                    mandato_fallback = mandatos_info[0][0]
+                    mandato_fallback = mandatos_info[-1][0]
 
                     # Determina estrutura: novo formato (subdir por legislatura) ou antigo (arquivos diretos)
                     try:

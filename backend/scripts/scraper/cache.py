@@ -43,7 +43,7 @@ def download_foto(url, filepath):
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         content_type = response.headers.get("content-type", "")
-        if "image" not in content_type:
+        if content_type and "image" not in content_type and "octet-stream" not in content_type:
             logging.warning(f"URL não retornou uma imagem: {url} -> {content_type}")
             return
         with open(filepath, "wb") as f:

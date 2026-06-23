@@ -162,7 +162,7 @@
 
                 <!-- Foto -->
                 <img
-                  :src="`https://www.camara.leg.br/internet/deputado/bandep/${dep.id}.jpg` || '/placeholder-user.svg'"
+                  :src="dep.foto || '/placeholder-user.svg'"
                   :alt="dep.nome"
                   class="h-10 w-10 rounded-full object-cover flex-shrink-0 border-2 border-border"
                   @error="onImgError"
@@ -204,13 +204,22 @@
         </div>
       </section>
       </template>
+
+      <section v-else class="py-20 text-center">
+        <p class="text-lg text-muted-foreground">
+          Nenhum dado de despesas disponível para esta legislatura.
+        </p>
+        <p class="text-sm text-muted-foreground mt-2">
+          Os dados estão sendo coletados em segundo plano. Tente novamente em alguns minutos.
+        </p>
+      </section>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
 import { Banknote, Users, Building2, ChevronRight } from 'lucide-vue-next'
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
@@ -314,7 +323,8 @@ const deputadosComGasto = computed(() => {
     nome: dep.nome_civil,
     partido: dep.sigla_partido,
     estado: dep.estado,
-    totalGasto: dep.total_gasto
+    totalGasto: dep.total_gasto,
+    foto: dep.foto
   }))
 })
 
@@ -367,4 +377,8 @@ const overviewStats = computed(() => [
     bgColor: "bg-chart-2/10" 
   },
 ])
+
+watch(() => store.legislatura, () => {
+  store.fetchEstatisticasGerais()
+})
 </script>

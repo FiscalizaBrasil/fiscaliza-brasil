@@ -41,11 +41,12 @@ const handleChange = async (event: Event) => {
   
   loadingStore.startLoading('Atualizando legislatura, aguarde...')
   try {
-    await props.store.setLegislatura(val)
+    await Promise.race([
+      props.store.setLegislatura(val),
+      new Promise<void>(r => setTimeout(r, 6000))
+    ])
   } finally {
-    setTimeout(() => {
-      loadingStore.stopLoading()
-    }, 400) // Small delay to ensure smooth transition
+    loadingStore.stopLoading()
   }
 }
 </script>
