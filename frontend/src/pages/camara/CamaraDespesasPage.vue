@@ -29,7 +29,7 @@
 
       <BaseLoading v-if="loadingStore.isLoading" :message="loadingStore.message" full-page />
 
-      <template v-else-if="store.generalStats">
+      <template v-else-if="store.panoramaStats">
         <!-- Overview -->
         <section class="py-8 bg-muted/30">
           <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -235,7 +235,7 @@ const router = useRouter()
 onMounted(async () => {
   loadingStore.startLoading('Carregando estatísticas da Câmara...')
   await Promise.allSettled([
-    store.fetchEstatisticasGerais(),
+    store.fetchPanorama(),
     store.fetchEstatisticasDeputados()
   ])
   loadingStore.stopLoading()
@@ -246,11 +246,11 @@ onMounted(async () => {
 })
 
 const todosPartidos = computed(() => {
-  if (!store.generalStats?.gastos_por_partido) return []
+  if (!store.panoramaStats?.gastos_por_partido) return []
   
-  const totalGeral = store.generalStats.gastos_por_partido.reduce((sum, p) => sum + p.valor, 0)
+  const totalGeral = store.panoramaStats.gastos_por_partido.reduce((sum, p) => sum + p.valor, 0)
   
-  return store.generalStats.gastos_por_partido.map(p => ({
+  return store.panoramaStats.gastos_por_partido.map(p => ({
     partido: p.partido,
     valor: p.valor,
     valorFormatado: formatCurrency(p.valor),
@@ -298,17 +298,17 @@ const getStrokeColorClass = (index: number) => {
 }
 
 const totalGastosFormatado = computed(() => {
-  if (!store.generalStats?.gastos_por_partido) return 'R$ 0'
-  const total = store.generalStats.gastos_por_partido.reduce((sum, p) => sum + p.valor, 0)
+  if (!store.panoramaStats?.gastos_por_partido) return 'R$ 0'
+  const total = store.panoramaStats.gastos_por_partido.reduce((sum, p) => sum + p.valor, 0)
   return formatCurrency(total)
 })
 
 const categoriasDespesas = computed(() => {
-  if (!store.generalStats?.gastos_por_categoria) return []
+  if (!store.panoramaStats?.gastos_por_categoria) return []
   
-  const maxValor = Math.max(...store.generalStats.gastos_por_categoria.map(c => c.valor))
+  const maxValor = Math.max(...store.panoramaStats.gastos_por_categoria.map(c => c.valor))
   
-  return store.generalStats.gastos_por_categoria.map(c => ({
+  return store.panoramaStats.gastos_por_categoria.map(c => ({
     nome: c.categoria,
     total: c.valor,
     percentual: (c.valor / maxValor) * 100
@@ -317,8 +317,8 @@ const categoriasDespesas = computed(() => {
 
 // Ranking de deputados por gasto
 const deputadosComGasto = computed(() => {
-  if (!store.generalStats?.gastos_deputados) return []
-  return store.generalStats.gastos_deputados.map(dep => ({
+  if (!store.panoramaStats?.gastos_deputados) return []
+  return store.panoramaStats.gastos_deputados.map(dep => ({
     id: dep.deputado_id,
     nome: dep.nome_civil,
     partido: dep.sigla_partido,
@@ -350,8 +350,8 @@ const onImgError = (e: Event) => {
 const overviewStats = computed(() => [
   { 
     label: "Total de Gastos", 
-    value: store.generalStats 
-      ? formatCurrency(store.generalStats.total_gastos)
+    value: store.panoramaStats 
+      ? formatCurrency(store.panoramaStats.total_gastos)
       : "...", 
     subvalue: "Acumulado Total",
     icon: Banknote, 
@@ -360,8 +360,8 @@ const overviewStats = computed(() => [
   },
   { 
     label: "Média por Deputado", 
-    value: store.generalStats && store.deputadoStats && store.deputadoStats.total_deputados > 0
-      ? formatCurrency(store.generalStats.total_gastos / store.deputadoStats.total_deputados)
+    value: store.panoramaStats && store.deputadoStats && store.deputadoStats.total_deputados > 0
+      ? formatCurrency(store.panoramaStats.total_gastos / store.deputadoStats.total_deputados)
       : "...", 
     icon: Users, 
     color: "text-accent", 
@@ -369,8 +369,8 @@ const overviewStats = computed(() => [
   },
   { 
     label: "Empresas Contratadas", 
-    value: store.generalStats 
-      ? store.generalStats.total_empresas_contratadas.toLocaleString()
+    value: store.panoramaStats 
+      ? store.panoramaStats.total_empresas_contratadas.toLocaleString()
       : "...", 
     icon: Building2, 
     color: "text-chart-2", 
@@ -379,6 +379,6 @@ const overviewStats = computed(() => [
 ])
 
 watch(() => store.legislatura, () => {
-  store.fetchEstatisticasGerais()
+  store.fetchPanorama()
 })
 </script>

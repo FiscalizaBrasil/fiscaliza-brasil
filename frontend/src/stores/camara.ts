@@ -69,6 +69,21 @@ export interface Categoria {
   valor: number
 }
 
+export interface EstatisticasPanorama {
+  total_gastos: number
+  total_empresas_contratadas: number
+  gastos_por_categoria: { categoria: string; valor: number }[]
+  gastos_por_partido: { partido: string; valor: number }[]
+  gastos_deputados: {
+    deputado_id: number
+    nome_civil: string
+    sigla_partido: string
+    estado: string
+    total_gasto: number
+    foto?: string
+  }[]
+}
+
 export interface EstatisticasGerais {
   total_gastos_12_meses: number
   total_gastos: number
@@ -201,6 +216,7 @@ export const useCamaraStore = defineStore("camara", () => {
 
   // General Stats state
   const generalStats = ref<EstatisticasGerais | null>(null)
+  const panoramaStats = ref<EstatisticasPanorama | null>(null)
   const evolucaoGastos = ref<{ ano: number; mes: number; valor: number }[]>([])
   const deputadoStats = ref<EstatisticasDeputado | null>(null)
 
@@ -383,6 +399,24 @@ export const useCamaraStore = defineStore("camara", () => {
         gastos_deputados: [],
         evolucao_gastos: [],
       }
+    }
+  }
+
+  const fetchPanorama = async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/camara/${legislatura.value}/despesas/panorama`)
+      if (!response.ok) throw new Error("Falha ao buscar panorama")
+      const stats = await response.json()
+      if (stats.gastos_deputados) {
+        stats.gastos_deputados = stats.gastos_deputados.map((d: any) => ({
+          ...d,
+          foto: absolutizeFoto(d.foto, `https://www.camara.leg.br/internet/deputado/bandep/${d.deputado_id}.jpg`)
+        }))
+      }
+      panoramaStats.value = stats
+    } catch (e: any) {
+      console.error("Erro ao buscar panorama de despesas:", e)
+      panoramaStats.value = null
     }
   }
 
@@ -656,6 +690,7 @@ export const useCamaraStore = defineStore("camara", () => {
     loadingDespesas,
     loadingEmendas,
     generalStats,
+    panoramaStats,
     evolucaoGastos,
     deputadoStats,
     loadingStats,
@@ -666,6 +701,7 @@ export const useCamaraStore = defineStore("camara", () => {
     fetchDespesasDeputado,
     fetchEmendasDeputado,
     fetchEstatisticasGerais,
+    fetchPanorama,
     fetchEvolucaoGastos,
     fetchEstatisticasDeputados,
     projetosLegislativosList,

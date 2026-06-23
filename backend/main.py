@@ -15,6 +15,7 @@ from api.camara.router import router as camara_router
 from api.senado.router import router as senado_router
 from api.portal.router import router as portal_router
 from scripts.scraper import start_background_import, start_background_fotos, scraping_status
+from scripts.stats_refresh import start_stats_refresh
 from database.cache import get_cache_stats, invalidate_cache
 
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
     logger.info("Iniciando downloads em background...")
     start_background_fotos()
     start_background_import()
+    start_stats_refresh()
     yield
 
 app = FastAPI(lifespan=lifespan)

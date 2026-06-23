@@ -542,7 +542,117 @@ def ensure_schema(cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_emendas_autor_lower ON portal.emendas(lower(autor));")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_emendas_ano ON portal.emendas(ano);")
 
-    logging.info("Tabelas criadas/verificadas com sucesso.")
+    # --- Schema stats: materialized views para agregações pré-computadas ---
+    cursor.execute("CREATE SCHEMA IF NOT EXISTS stats;")
+
+    cursor.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS stats.camara_despesas_totais AS
+        WITH base AS (
+            SELECT
+                m.legislatura_id,
+                desp.valor_documento,
+                UPPER(TRIM(REGEXP_REPLACE(desp.nome_fornecedor,
+                    '\\s+(S/A|S\\.A\\.|SA|LTDA|EIRELI|ME|EPP|EI|LIMITADA).*$', '', 'gi'))) AS fornecedor_norm,
+                REGEXP_REPLACE(desp.cnpj_cpf_fornecedor, '[^0-9]', '', 'g') AS cnpj_clean
+            FROM camara.deputados_despesas desp
+            JOIN camara.deputados_mandatos m ON desp.mandato_id = m.id
+        )
+        SELECT
+            COALESCE(legislatura_id, 0) AS legislatura_id,
+            SUM(valor_documento) AS total_gastos,
+            COUNT(DISTINCT CASE WHEN LENGTH(cnpj_clean) > 11 THEN fornecedor_norm END) AS total_empresas_contratadas
+        FROM base
+        GROUP BY GROUPING SETS ((legislatura_id), ());
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_totais_leg ON stats.camara_despesas_totais(legislatura_id);")
+
+    cursor.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS stats.camara_despesas_categorias AS
+        SELECT
+            COALESCE(m.legislatura_id, 0) AS legislatura_id,
+            d.tipo_despesa AS categoria,
+            SUM(d.valor_documento) AS valor
+        FROM camara.deputados_despesas d
+        JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
+        GROUP BY GROUPING SETS ((m.legislatura_id, d.tipo_despesa), (d.tipo_despesa));
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_categ_leg_cat ON stats.camara_despesas_categorias(legislatura_id, categoria);")
+
+    cursor.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS stats.camara_despesas_partidos AS
+        SELECT
+            COALESCE(m.legislatura_id, 0) AS legislatura_id,
+            m.sigla_partido AS partido,
+            SUM(desp.valor_documento) AS valor
+        FROM camara.deputados_mandatos m
+        JOIN camara.deputados_despesas desp ON m.id = desp.mandato_id
+        WHERE m.sigla_partido IS NOT NULL
+        GROUP BY GROUPING SETS ((m.legislatura_id, m.sigla_partido), (m.sigla_partido));
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_part_leg_par ON stats.camara_despesas_partidos(legislatura_id, partido);")
+
+    cursor.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS stats.camara_despesas_deputados AS
+        SELECT
+            COALESCE(m.legislatura_id, 0) AS legislatura_id,
+            d.id AS deputado_id,
+            d.nome_civil,
+            m.sigla_partido,
+            m.sigla_uf AS estado,
+            SUM(desp.valor_documento) AS total_gasto
+        FROM camara.deputados_despesas desp
+        JOIN camara.deputados_mandatos m ON desp.mandato_id = m.id
+        JOIN camara.deputados d ON m.deputado_id = d.id
+        GROUP BY GROUPING SETS (
+            (m.legislatura_id, d.id, d.nome_civil, m.sigla_partido, m.sigla_uf),
+            (d.id, d.nome_civil, m.sigla_partido, m.sigla_uf)
+        );
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_dep_leg_dep_par_uf ON stats.camara_despesas_deputados(legislatura_id, deputado_id, sigla_partido, estado);")
+
+    cursor.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS stats.camara_despesas_estados AS
+        SELECT
+            COALESCE(m.legislatura_id, 0) AS legislatura_id,
+            m.sigla_uf AS estado,
+            SUM(desp.valor_documento) AS valor
+        FROM camara.deputados_mandatos m
+        JOIN camara.deputados_despesas desp ON m.id = desp.mandato_id
+        WHERE m.sigla_uf IS NOT NULL
+        GROUP BY GROUPING SETS ((m.legislatura_id, m.sigla_uf), (m.sigla_uf));
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_est_leg_uf ON stats.camara_despesas_estados(legislatura_id, estado);")
+
+    cursor.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS stats.camara_despesas_evolucao AS
+        SELECT
+            COALESCE(m.legislatura_id, 0) AS legislatura_id,
+            desp.ano,
+            desp.mes,
+            SUM(desp.valor_documento) AS valor
+        FROM camara.deputados_despesas desp
+        JOIN camara.deputados_mandatos m ON desp.mandato_id = m.id
+        GROUP BY GROUPING SETS ((m.legislatura_id, desp.ano, desp.mes), (desp.ano, desp.mes));
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_evol_leg_ano_mes ON stats.camara_despesas_evolucao(legislatura_id, ano, mes);")
+
+    cursor.execute("""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS stats.camara_empresas_ranking AS
+        SELECT
+            COALESCE(m.legislatura_id, 0) AS legislatura_id,
+            d.cnpj_cpf_fornecedor AS cnpj,
+            MAX(d.nome_fornecedor) AS nome,
+            SUM(d.valor_liquido) AS valor_total,
+            COUNT(*) AS qtd_contratos,
+            STRING_AGG(DISTINCT m.sigla_partido, ', ' ORDER BY m.sigla_partido) AS partidos
+        FROM camara.deputados_despesas d
+        LEFT JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
+        WHERE d.cnpj_cpf_fornecedor IS NOT NULL AND TRIM(d.cnpj_cpf_fornecedor) != ''
+        GROUP BY GROUPING SETS ((m.legislatura_id, d.cnpj_cpf_fornecedor), (d.cnpj_cpf_fornecedor));
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_emp_leg_cnpj ON stats.camara_empresas_ranking(legislatura_id, cnpj);")
+
+    logging.info("Tabelas e materialized views criadas/verificadas com sucesso.")
 
 
 def main():

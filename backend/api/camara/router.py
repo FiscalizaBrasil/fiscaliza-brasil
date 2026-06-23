@@ -1454,199 +1454,94 @@ def get_estatisticas_despesas(legislatura: int):
         conn = db.get_db_connection()
         if not conn:
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
-            # Período da legislatura para filtrar despesas por ano
-            if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
 
-            # 1. Gastos por Categoria
-            query_cat = """
-                SELECT d.tipo_despesa as categoria, SUM(d.valor_documento) as valor
-                FROM camara.deputados_despesas d
-                JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
-                WHERE 1=1
-            """
-            params = []
-            if legislatura:
-                query_cat += " AND m.legislatura_id = %s AND d.ano BETWEEN %s AND %s"
-                params.extend([legislatura, start_year, end_year])
-            
-            query_cat += " GROUP BY d.tipo_despesa ORDER BY valor DESC"
-            cursor.execute(query_cat, tuple(params))
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT total_gastos, total_empresas_contratadas FROM stats.camara_despesas_totais WHERE legislatura_id = %s",
+                (legislatura,)
+            )
+            row = cursor.fetchone()
+            total_geral = float(row[0]) if row else 0.0
+            total_empresas = int(row[1]) if row else 0
+
+            cursor.execute(
+                "SELECT COALESCE(SUM(valor), 0) FROM stats.camara_despesas_evolucao WHERE legislatura_id = %s AND (ano, mes) >= (EXTRACT(YEAR FROM CURRENT_DATE - INTERVAL '12 months')::int, EXTRACT(MONTH FROM CURRENT_DATE - INTERVAL '12 months')::int)",
+                (legislatura,)
+            )
+            total_12_meses = float(cursor.fetchone()[0] or 0)
+
+            cursor.execute(
+                "SELECT categoria, valor FROM stats.camara_despesas_categorias WHERE legislatura_id = %s ORDER BY valor DESC",
+                (legislatura,)
+            )
             resultados_categoria = cursor.fetchall()
-            
+
             gastos_categoria = []
             total_outros = 0.0
             LIMITE_TOP = 9
-            
+
             for i, r in enumerate(resultados_categoria):
                 nome_formatado = r[0].title().replace("_", " ") if r[0] else "Outros"
                 valor = float(r[1])
-                
+
                 if i < LIMITE_TOP:
                     gastos_categoria.append({"categoria": nome_formatado, "valor": valor})
                 else:
                     total_outros += valor
-            
+
             if total_outros > 0:
                 gastos_categoria.append({"categoria": "Outros", "valor": total_outros})
 
-            # 2. Evolução Mensal
-            query_mensal = """
-                SELECT d.ano, d.mes, SUM(d.valor_documento) as valor
-                FROM camara.deputados_despesas d
-                JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
-                WHERE 1=1
-            """
-            params_mensal = []
-            if legislatura:
-                query_mensal += " AND m.legislatura_id = %s AND d.ano BETWEEN %s AND %s"
-                params_mensal.extend([legislatura, start_year, end_year])
-                
-            query_mensal += " GROUP BY d.ano, d.mes ORDER BY d.ano DESC, d.mes DESC LIMIT 12"
-            cursor.execute(query_mensal, tuple(params_mensal))
+            cursor.execute(
+                "SELECT ano, mes, valor FROM stats.camara_despesas_evolucao WHERE legislatura_id = %s ORDER BY ano DESC, mes DESC LIMIT 12",
+                (legislatura,)
+            )
             gastos_mensais = [{"ano": r[0], "mes": r[1], "valor": float(r[2])} for r in cursor.fetchall()]
 
-            # 2b. Evolução de Gastos (todos os meses da legislatura ou anual quando legislatura=0)
             if legislatura:
-                query_evolucao = """
-                    SELECT d.ano, d.mes as mes, SUM(d.valor_documento) as valor
-                    FROM camara.deputados_despesas d
-                    JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
-                    WHERE m.legislatura_id = %s AND d.ano BETWEEN %s AND %s
-                    GROUP BY d.ano, d.mes ORDER BY d.ano ASC, d.mes ASC
-                """
-                params_evolucao = [legislatura, start_year, end_year]
+                cursor.execute(
+                    "SELECT ano, mes, valor FROM stats.camara_despesas_evolucao WHERE legislatura_id = %s ORDER BY ano ASC, mes ASC",
+                    (legislatura,)
+                )
+                evolucao_gastos = [{"ano": r[0], "mes": r[1], "valor": float(r[2])} for r in cursor.fetchall()]
             else:
-                query_evolucao = """
-                    SELECT d.ano, 0 as mes, SUM(d.valor_documento) as valor
-                    FROM camara.deputados_despesas d
-                    GROUP BY d.ano ORDER BY d.ano ASC
-                """
-                params_evolucao = []
-            cursor.execute(query_evolucao, tuple(params_evolucao))
-            evolucao_gastos = [{"ano": r[0], "mes": r[1], "valor": float(r[2])} for r in cursor.fetchall()]
+                cursor.execute(
+                    "SELECT ano, 0 as mes, SUM(valor) FROM stats.camara_despesas_evolucao WHERE legislatura_id = 0 GROUP BY ano ORDER BY ano ASC"
+                )
+                evolucao_gastos = [{"ano": r[0], "mes": r[1], "valor": float(r[2])} for r in cursor.fetchall()]
 
-            # 3. Gastos por Estado
-            query_estado = """
-                SELECT m.sigla_uf as estado, SUM(desp.valor_documento) as valor
-                FROM camara.deputados_mandatos m
-                JOIN camara.deputados_despesas desp ON m.id = desp.mandato_id
-                WHERE m.sigla_uf IS NOT NULL
-            """
-            params_est = []
-            if legislatura:
-                query_estado += " AND m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s"
-                params_est.extend([legislatura, start_year, end_year])
-            
-            query_estado += " GROUP BY m.sigla_uf ORDER BY valor DESC"
-            cursor.execute(query_estado, tuple(params_est))
+            cursor.execute(
+                "SELECT estado, valor FROM stats.camara_despesas_estados WHERE legislatura_id = %s ORDER BY valor DESC",
+                (legislatura,)
+            )
             gastos_estado = [{"estado": r[0], "valor": float(r[1])} for r in cursor.fetchall()]
 
-            # 4. Gastos por Partido
-            query_partido = """
-                SELECT m.sigla_partido as partido, SUM(desp.valor_documento) as valor
-                FROM camara.deputados_mandatos m
-                JOIN camara.deputados_despesas desp ON m.id = desp.mandato_id
-                WHERE m.sigla_partido IS NOT NULL
-            """
-            params_part = []
-            if legislatura:
-                query_partido += " AND m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s"
-                params_part.extend([legislatura, start_year, end_year])
-                
-            query_partido += " GROUP BY m.sigla_partido ORDER BY valor DESC"
-            cursor.execute(query_partido, tuple(params_part))
+            cursor.execute(
+                "SELECT partido, valor FROM stats.camara_despesas_partidos WHERE legislatura_id = %s ORDER BY valor DESC",
+                (legislatura,)
+            )
             gastos_partido = [{"partido": r[0], "valor": float(r[1])} for r in cursor.fetchall()]
 
-            # 5. Totais
-            if legislatura:
-                cursor.execute("""
-                    SELECT SUM(d.valor_documento)
-                    FROM camara.deputados_despesas d
-                    JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
-                    WHERE m.legislatura_id = %s
-                      AND d.ano BETWEEN %s AND %s
-                      AND TO_DATE(CAST(d.ano AS TEXT) || '-' || CAST(d.mes AS TEXT), 'YYYY-MM') >= (CURRENT_DATE - INTERVAL '1 year')
-                """, (legislatura, start_year, end_year))
-            else:
-                cursor.execute("""
-                    SELECT SUM(valor_documento)
-                    FROM camara.deputados_despesas
-                    WHERE TO_DATE(CAST(ano AS TEXT) || '-' || CAST(mes AS TEXT), 'YYYY-MM') >= (CURRENT_DATE - INTERVAL '1 year')
-                """)
-            total_12_row = cursor.fetchone()
-            total_12_meses = total_12_row[0] or 0
-
-            query_total_geral = "SELECT SUM(valor_documento) FROM camara.deputados_despesas desp"
-            params_total = []
-            if legislatura:
-                query_total_geral = """
-                    SELECT SUM(desp.valor_documento)
-                    FROM camara.deputados_despesas desp
-                    JOIN camara.deputados_mandatos m ON desp.mandato_id = m.id
-                    WHERE m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s
-                """
-                params_total.extend([legislatura, start_year, end_year])
-            
-            cursor.execute(query_total_geral, tuple(params_total))
-            total_geral = cursor.fetchone()[0] or 0
-            
-            query_total_fornecedores = "SELECT COUNT(DISTINCT UPPER(TRIM(REGEXP_REPLACE(desp.nome_fornecedor, '\\s+(S/A|S\\.A\\.|SA|LTDA|EIRELI|ME|EPP|EI|LIMITADA).*$', '', 'gi')))) FROM camara.deputados_despesas desp WHERE LENGTH(REGEXP_REPLACE(desp.cnpj_cpf_fornecedor, '[^0-9]', '', 'g')) > 11"
-            params_forn = []
-            if legislatura:
-                query_total_fornecedores = """
-                    SELECT COUNT(DISTINCT UPPER(TRIM(REGEXP_REPLACE(desp.nome_fornecedor, '\\s+(S/A|S\\.A\\.|SA|LTDA|EIRELI|ME|EPP|EI|LIMITADA).*$', '', 'gi'))))
-                    FROM camara.deputados_despesas desp
-                    JOIN camara.deputados_mandatos m ON desp.mandato_id = m.id
-                    WHERE m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s AND LENGTH(REGEXP_REPLACE(desp.cnpj_cpf_fornecedor, '[^0-9]', '', 'g')) > 11
-                """
-                params_forn.extend([legislatura, start_year, end_year])
-                
-            cursor.execute(query_total_fornecedores, tuple(params_forn))
-            total_empresas = cursor.fetchone()[0] or 0
-
-            query_gastos_dep = """
-            SELECT 
-                d.id AS deputado_id,
-                d.nome_civil,
-                m.sigla_partido,
-                m.sigla_uf AS estado,
-                SUM(desp.valor_documento) AS total_gasto
-            FROM camara.deputados_despesas desp
-            JOIN camara.deputados_mandatos m ON desp.mandato_id = m.id
-            JOIN camara.deputados d ON m.deputado_id = d.id
-            WHERE 1=1
-            """
-            params_dep = []
-            if legislatura:
-                query_gastos_dep += " AND m.legislatura_id = %s AND desp.ano BETWEEN %s AND %s"
-                params_dep.extend([legislatura, start_year, end_year])
-            
-            query_gastos_dep += """
-            GROUP BY d.id, d.nome_civil, m.sigla_partido, m.sigla_uf
-            ORDER BY total_gasto DESC
-            LIMIT 10;
-            """
-            cursor.execute(query_gastos_dep, tuple(params_dep))
+            cursor.execute(
+                "SELECT deputado_id, nome_civil, sigla_partido, estado, total_gasto FROM stats.camara_despesas_deputados WHERE legislatura_id = %s ORDER BY total_gasto DESC LIMIT 10",
+                (legislatura,)
+            )
             gastos_dep_raw = cursor.fetchall()
-            
+
             gastos_deputados = [
                 {
                     "deputado_id": r[0], "nome_civil": r[1], "sigla_partido": r[2],
                     "estado": r[3], "total_gasto": float(r[4]),
                     "foto": get_foto_url_camara(r[0], f"https://www.camara.leg.br/internet/deputado/bandep/{r[0]}.jpg")
-                } 
+                }
                 for r in gastos_dep_raw
             ]
 
             return {
-                "total_gastos_12_meses": float(total_12_meses),
-                "total_12_meses": float(total_12_meses),
-                "total_gastos": float(total_geral),
-                "total_empresas_contratadas": int(total_empresas),
+                "total_gastos_12_meses": total_12_meses,
+                "total_12_meses": total_12_meses,
+                "total_gastos": total_geral,
+                "total_empresas_contratadas": total_empresas,
                 "gastos_por_categoria": gastos_categoria,
                 "gastos_por_mes": gastos_mensais,
                 "gastos_por_estado": gastos_estado,
@@ -1661,70 +1556,115 @@ def get_estatisticas_despesas(legislatura: int):
         if conn:
             db.release_db_connection(conn)
 
+@router.get("/{legislatura}/despesas/panorama", summary="Obtém o panorama de gastos para a página de despesas da Câmara (leve)")
+@ttl_cache(maxsize=16, ttl=300, cache_name="camara_despesas_panorama")
+def get_panorama_despesas(legislatura: int):
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT total_gastos, total_empresas_contratadas FROM stats.camara_despesas_totais WHERE legislatura_id = %s",
+                (legislatura,)
+            )
+            row = cursor.fetchone()
+            total_geral = float(row[0]) if row else 0.0
+            total_empresas = int(row[1]) if row else 0
+
+            cursor.execute(
+                "SELECT categoria, valor FROM stats.camara_despesas_categorias WHERE legislatura_id = %s ORDER BY valor DESC",
+                (legislatura,)
+            )
+            resultados_categoria = cursor.fetchall()
+
+            gastos_categoria = []
+            total_outros = 0.0
+            LIMITE_TOP = 9
+
+            for i, r in enumerate(resultados_categoria):
+                nome_formatado = r[0].title().replace("_", " ") if r[0] else "Outros"
+                valor = float(r[1])
+
+                if i < LIMITE_TOP:
+                    gastos_categoria.append({"categoria": nome_formatado, "valor": valor})
+                else:
+                    total_outros += valor
+
+            if total_outros > 0:
+                gastos_categoria.append({"categoria": "Outros", "valor": total_outros})
+
+            cursor.execute(
+                "SELECT partido, valor FROM stats.camara_despesas_partidos WHERE legislatura_id = %s ORDER BY valor DESC",
+                (legislatura,)
+            )
+            gastos_partido = [{"partido": r[0], "valor": float(r[1])} for r in cursor.fetchall()]
+
+            cursor.execute(
+                "SELECT deputado_id, nome_civil, sigla_partido, estado, total_gasto FROM stats.camara_despesas_deputados WHERE legislatura_id = %s ORDER BY total_gasto DESC LIMIT 10",
+                (legislatura,)
+            )
+            gastos_dep_raw = cursor.fetchall()
+
+            gastos_deputados = [
+                {
+                    "deputado_id": r[0], "nome_civil": r[1], "sigla_partido": r[2],
+                    "estado": r[3], "total_gasto": float(r[4]),
+                    "foto": get_foto_url_camara(r[0], f"https://www.camara.leg.br/internet/deputado/bandep/{r[0]}.jpg")
+                }
+                for r in gastos_dep_raw
+            ]
+
+            return {
+                "total_gastos": total_geral,
+                "total_empresas_contratadas": total_empresas,
+                "gastos_por_categoria": gastos_categoria,
+                "gastos_por_partido": gastos_partido,
+                "gastos_deputados": gastos_deputados
+            }
+    except Exception as e:
+        _log.error(f"Erro ao buscar panorama de despesas: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao processar panorama de despesas")
+    finally:
+        if conn:
+            db.release_db_connection(conn)
+
+
 @router.get("/{legislatura}/empresas/estatisticas", summary="Obtém as estatísticas e ranking das empresas contratadas")
 def get_estatisticas_empresas(legislatura: int, limit: int = 20):
     """
     Retorna estatísticas de empresas fornecedoras dos deputados.
-    Calcula os dados em tempo real a partir da tabela de despesas.
+    Lê da materialized view stats.camara_empresas_ranking (atualizada em background).
     """
     conn = None
     try:
         conn = db.get_db_connection()
         if not conn:
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
+
         with conn.cursor() as cursor:
-            # Determinar o período da legislatura
-            if legislatura and legislatura > 0:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
-                filtro_ano = "AND CAST(EXTRACT(YEAR FROM d.data_documento) AS INTEGER) BETWEEN %s AND %s"
-                params_ano = [start_year, end_year]
-            else:
-                filtro_ano = ""
-                params_ano = []
-            
-            # 1. Estatísticas Gerais - calculadas em tempo real
-            query_gerais = f"""
-                SELECT 
-                    COUNT(DISTINCT d.cnpj_cpf_fornecedor) as total_empresas,
-                    COALESCE(SUM(d.valor_liquido), 0) as total_pago,
-                    COUNT(*) as total_contratos
-                FROM camara.deputados_despesas d
-                WHERE d.cnpj_cpf_fornecedor IS NOT NULL AND TRIM(d.cnpj_cpf_fornecedor) != ''
-                  {filtro_ano}
-            """
-            cursor.execute(query_gerais, tuple(params_ano))
-            res_stats = cursor.fetchone()
-            
-            total_empresas = res_stats[0] if res_stats else 0
-            total_pago = float(res_stats[1]) if res_stats else 0.0
-            total_contratos = res_stats[2] if res_stats else 0
-            
+            cursor.execute(
+                "SELECT COUNT(*), COALESCE(SUM(valor_total), 0), COALESCE(SUM(qtd_contratos), 0) FROM stats.camara_empresas_ranking WHERE legislatura_id = %s",
+                (legislatura,)
+            )
+            ga, gp, gc = cursor.fetchone()
+            total_empresas = ga or 0
+            total_pago = float(gp) if gp else 0.0
+            total_contratos = gc or 0
+
             if total_empresas == 0:
                 return {"geral": {"total_empresas": 0, "total_pago": 0.0, "total_contratos": 0}, "ranking": []}
 
-            # 2. Ranking - agrupado por CNPJ/CPF apenas (consolidando variações de nome)
-            query_ranking = f"""
-                SELECT 
-                    d.cnpj_cpf_fornecedor,
-                    MAX(d.nome_fornecedor) as nome_fornecedor,
-                    COALESCE(SUM(d.valor_liquido), 0) as valor_total,
-                    COUNT(*) as qtd_contratos,
-                    STRING_AGG(DISTINCT m.sigla_partido, ', ' ORDER BY m.sigla_partido) as partidos
-                FROM camara.deputados_despesas d
-                LEFT JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
-                WHERE d.cnpj_cpf_fornecedor IS NOT NULL AND TRIM(d.cnpj_cpf_fornecedor) != ''
-                  {filtro_ano}
-                GROUP BY d.cnpj_cpf_fornecedor
-                ORDER BY valor_total DESC
-                LIMIT %s
-            """
-            cursor.execute(query_ranking, tuple(params_ano + [limit]))
+            cursor.execute(
+                "SELECT cnpj, nome, valor_total, qtd_contratos, partidos FROM stats.camara_empresas_ranking WHERE legislatura_id = %s ORDER BY valor_total DESC LIMIT %s",
+                (legislatura, limit)
+            )
             res_ranking = cursor.fetchall()
-            
+
             total_pago_real = total_pago if total_pago > 0 else 1.0
-            
+
             ranking_formatado = [
                 {
                     "rank": idx + 1,
