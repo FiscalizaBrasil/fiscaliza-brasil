@@ -24,7 +24,9 @@ else:
     )
 
 def get_db_connection():
-    return db_pool.getconn()
+    conn = db_pool.getconn()
+    conn.autocommit = False
+    return conn
 
 def release_db_connection(conn):
     """

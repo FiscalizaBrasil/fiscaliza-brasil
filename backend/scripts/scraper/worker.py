@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import DATA_DIR, ANOS_PADRAO, SENADO_ULTIMO_ANO_CACHE_SECONDS, SENADO_ANO_INICIO, scraping_status, _status_lock
 from .cache import is_cache_valid, remover_acentos
+from .verification import is_verified, clean_expired
 
 from .camara.deputados import fetch_deputados_todas_legislaturas
 from .camara.despesas import fetch_despesas_deputado
@@ -236,7 +237,6 @@ def _get_deputados_pendentes(data_dir=None):
     seen = set()
     pendentes = []
 
-    # Deputados que já têm despesas no banco, por legislatura
     db_com_legislatura = set()
 
     if db is not None:
@@ -268,7 +268,9 @@ def _get_deputados_pendentes(data_dir=None):
             continue
         seen.add(chave)
 
-        # Pula se já tem despesas no banco para esta legislatura
+        if is_verified("camara_despesas", f"{dep_id}_{id_leg}"):
+            continue
+
         if chave in db_com_legislatura:
             continue
 
@@ -311,6 +313,9 @@ def _get_anos_senado_pendentes(data_dir=None):
         filepath = os.path.join(data_dir, f"{ano}.json")
         if not os.path.isfile(filepath):
             pendentes.append(ano)
+            continue
+
+        if is_verified("senado_despesas", str(ano)):
             continue
 
         if db is not None:
@@ -392,6 +397,9 @@ def _get_parlamentares_sem_emendas(data_dir=None):
     for nome in nomes_parlamentares:
         nome_sanitizado = _sanitize_nome(nome)
 
+        if is_verified("portal_emendas", nome_sanitizado.upper()):
+            continue
+
         # Cache válido no formato novo: {nome}_{ano}_pagina1.json
         pagina1_path = os.path.join(data_dir, f"{nome_sanitizado}_{ano_atual}_pagina1.json")
         if os.path.isfile(pagina1_path) and is_cache_valid(pagina1_path):
@@ -417,6 +425,8 @@ def _get_deputados_sem_historico(data_dir=None):
 
     sem_historico = []
     for dep_id in sorted(ids_unicos):
+        if is_verified("camara_historico", str(dep_id)):
+            continue
         filepath = os.path.join(data_dir, f"{dep_id}.json")
         if not os.path.isfile(filepath) or not is_cache_valid(filepath):
             sem_historico.append(dep_id)
@@ -433,6 +443,8 @@ def _get_deputados_sem_detalhes(data_dir=None):
 
     sem_detalhes = []
     for dep_id in sorted(ids_unicos):
+        if is_verified("camara_detalhes", str(dep_id)):
+            continue
         filepath = os.path.join(data_dir, f"{dep_id}.json")
         if not os.path.isfile(filepath) or not is_cache_valid(filepath):
             sem_detalhes.append(dep_id)
@@ -900,6 +912,8 @@ def _background_worker_generico(logger, name, stop_flag_attr, perfil_fn,
 
     while not stop_flag:
         try:
+            clean_expired()
+
             if perfil_fn:
                 perfil_fn()
 

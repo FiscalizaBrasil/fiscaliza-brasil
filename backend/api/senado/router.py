@@ -1,8 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 from datetime import date
-import psycopg2
 import logging
-import threading
 
 _log = logging.getLogger(__name__)
 
@@ -10,171 +8,11 @@ _log = logging.getLogger(__name__)
 import database.db as db
 from database.utils import get_maior_legislatura_senado, get_legislatura_atual, periodo_legislatura, get_foto_url_senado
 from database.cache import ttl_cache
-from scripts.import_data import import_all_data, import_despesas_senado
-from scripts.scraper import fetch_despesas_senado_ano, fetch_despesas_senado_todas, fetch_emendas_parlamentar
 
 router = APIRouter(
     prefix="/senado",
     tags=["Senado"]
 )
-
-# Lock para evitar múltiplos downloads simultâneos do Senado
-_senado_download_lock = threading.Lock()
-_senado_download_in_progress = False
-
-
-# ============================================================
-# Função auxiliar para baixar despesas do Senado sob demanda
-# ============================================================
-
-def _ensure_despesas_senado():
-    """
-    Verifica se existem despesas CEAPS no banco.
-    Se não houver, dispara o download prioritário em background.
-    """
-    conn = None
-    try:
-        conn = db.get_db_connection()
-        if not conn:
-            return
-        
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM senado.despesa_ceaps")
-            count = cursor.fetchone()[0]
-            
-            if count == 0:
-                _log.info("Sem despesas CEAPS no banco. Disparando download prioritário...")
-                threading.Thread(
-                    target=_download_and_import_despesas_senado,
-                    daemon=True
-                ).start()
-    except Exception as e:
-        _log.error(f"Erro ao verificar despesas do senado: {e}")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
-
-
-def _download_and_import_despesas_senado():
-    """
-    Baixa as despesas CEAPS de todos os anos e importa para o banco.
-    Executado em thread separada.
-    """
-    try:
-        _log.info("Download prioritário: despesas CEAPS do Senado")
-        anos = list(range(2023, 2027))
-        for ano in anos:
-            fetch_despesas_senado_ano(ano)
-            # Importa incrementalmente cada ano após baixar
-            conn = db.get_db_connection()
-            if conn:
-                try:
-                    import_despesas_senado(conn, ano=ano)
-                finally:
-                    db.release_db_connection(conn)
-        
-        _log.info("Download e importação de despesas CEAPS concluídos")
-    except Exception as e:
-        _log.error(f"Erro no download prioritário do senado: {e}")
-
-
-def _download_and_import_senado_todas():
-    """
-    Baixa todas as despesas CEAPS do Senado (todos os anos disponíveis)
-    e importa para o banco de dados. Usa lock para evitar execução concorrente.
-    Executado em thread separada.
-    """
-    global _senado_download_in_progress
-    try:
-        _log.info("[SENADO] Download completo de despesas CEAPS (todos os anos)...")
-        from scripts.scraper.config import ANOS_PADRAO
-        for ano in ANOS_PADRAO:
-            fetch_despesas_senado_ano(ano)
-            # Importa incrementalmente cada ano após baixar
-            conn = db.get_db_connection()
-            if conn:
-                try:
-                    import_despesas_senado(conn, ano=ano)
-                    _log.info(f"[SENADO] Despesas de {ano} importadas para o banco.")
-                except Exception as import_err:
-                    _log.error(f"[SENADO] Erro ao importar despesas de {ano}: {import_err}")
-                finally:
-                    db.release_db_connection(conn)
-        
-        _log.info("[SENADO] Download e importação de todas as despesas CEAPS concluídos.")
-    except Exception as e:
-        _log.error(f"[SENADO] Erro no download completo: {e}")
-    finally:
-        with _senado_download_lock:
-            _senado_download_in_progress = False
-
-
-def _ensure_emendas_senador(senador_codigo: int, nome_senador: str):
-    """
-    Verifica se existem emendas no banco para o senador.
-    Se não houver, dispara o download prioritário em background.
-    """
-    conn = None
-    try:
-        conn = db.get_db_connection()
-        if not conn:
-            return
-        
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT COUNT(*) FROM portal.emendas e
-                JOIN senado.parlamentar s 
-                  ON (lower(e.nome_autor) = lower(s.nome_completo) 
-                      OR lower(e.nome_autor) = lower(s.nome_parlamentar))
-                WHERE s.codigo = %s
-            """, (senador_codigo,))
-            count = cursor.fetchone()[0]
-            
-            if count == 0:
-                _log.info(f"Sem emendas no banco para senador {senador_codigo} ({nome_senador}). Disparando download prioritário...")
-                threading.Thread(
-                    target=_download_and_import_emendas_senador,
-                    args=(senador_codigo, nome_senador),
-                    daemon=True
-                ).start()
-    except Exception as e:
-        _log.error(f"Erro ao verificar emendas do senador {senador_codigo}: {e}")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
-
-
-def _download_and_import_emendas_senador(senador_codigo: int, nome_senador: str):
-    """
-    Baixa as emendas de um senador e importa para o banco.
-    Executado em thread separada.
-    """
-    try:
-        _log.info(f"Download prioritário: emendas do senador {senador_codigo} ({nome_senador})")
-        
-        # Busca todas as páginas de emendas para este senador
-        pagina = 1
-        while True:
-            result = fetch_emendas_parlamentar(nome_senador.upper(), pagina=pagina)
-            emendas = result.get("emendas", [])
-            if not emendas:
-                break
-            pagina += 1
-            if pagina > 50:
-                break
-        
-        # Importa para o banco
-        from scripts.import_data import import_emendas
-        if import_emendas is not None:
-            conn = db.get_db_connection()
-            if conn:
-                try:
-                    import_emendas(conn)
-                    _log.info(f"Download e importação de emendas concluídos para senador {senador_codigo}")
-                finally:
-                    db.release_db_connection(conn)
-    except Exception as e:
-        _log.error(f"Erro no download prioritário de emendas do senador {senador_codigo}: {e}")
 
 
 def _periodo_legislatura(legislatura: int):
@@ -706,12 +544,6 @@ WHERE codigo = %s;"""
                 maior_leg = get_maior_legislatura_senado(conn)
                 leg_exibida = maior_leg if maior_leg else 57
 
-            # Dispara download de emendas em background se não houver dados
-            if total_emendas == 0:
-                nome_senador = resultado[1] or resultado[2]  # nome_parlamentar ou nome_completo
-                if nome_senador:
-                    _ensure_emendas_senador(senador_codigo, nome_senador)
-
             return {
                 "senador": {
                     "codigo": resultado[0],
@@ -749,12 +581,6 @@ def get_despesas_senador(legislatura: int, senador_codigo: int, pagina: int = 1)
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
-            # Verifica se existem despesas no banco; se não, dispara download prioritário
-            cursor.execute("SELECT COUNT(*) FROM senado.despesa_ceaps")
-            count_despesas = cursor.fetchone()[0]
-            if count_despesas == 0:
-                _ensure_despesas_senado()
-
             # 1. Buscar o total de despesas para paginação
             query_count = """SELECT COUNT(*) 
                 FROM senado.despesa_ceaps d
@@ -1822,24 +1648,11 @@ def get_resumo_principal_senado(legislatura: int = 0):
                 total_mandatos = cursor.fetchone()[0]
             
             if total_mandatos == 0:
-                # Tenta importar dados dos JSONs baixados pelo scraper
-                _log.info("Banco vazio detectado. Tentando importar dados dos arquivos JSON...")
-                try:
-                    import_all_data(conn)
-                    _log.info("Importação concluída. Refazendo consulta...")
-                except Exception as import_err:
-                    _log.error(f"Erro ao importar dados: {import_err}")
-                
-                with conn.cursor() as cursor:
-                    cursor.execute("SELECT COUNT(*) FROM senado.mandato")
-                    total_mandatos = cursor.fetchone()[0]
-                
-                if total_mandatos == 0:
-                    return {
-                        "total_parlamentares": 0,
-                        "gastos_12_meses": 0.0,
-                        "db_vazio": True
-                    }
+                return {
+                    "total_parlamentares": 0,
+                    "gastos_12_meses": 0.0,
+                    "db_vazio": True
+                }
         
         with conn.cursor() as cursor:
             # 1. Total de senadores
@@ -1898,18 +1711,6 @@ def get_resumo_principal_senado(legislatura: int = 0):
             gastos_12_meses = float(cursor.fetchone()[0] or 0)
 
             db_vazio = total_senadores == 0
-
-            # Se tem senadores mas não tem gastos, dispara download prioritário em background
-            if not db_vazio and gastos_12_meses == 0:
-                _log.info("Resumo: senadores encontrados mas sem despesas. Disparando download prioritário...")
-                global _senado_download_in_progress
-                with _senado_download_lock:
-                    if not _senado_download_in_progress:
-                        _senado_download_in_progress = True
-                        threading.Thread(
-                            target=_download_and_import_senado_todas,
-                            daemon=True
-                        ).start()
 
             return {
                 "total_parlamentares": total_senadores,

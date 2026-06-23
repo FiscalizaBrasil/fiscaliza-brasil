@@ -6,6 +6,7 @@ import random
 from ..config import DATA_DIR, ANOS_PADRAO
 from ..cache import is_cache_valid
 from ..fetcher import fetch_paginated
+from ..verification import is_verified
 
 _log = logging.getLogger("CAMARA")
 
@@ -101,6 +102,9 @@ def fetch_despesas_todas_camara(data_dir=None):
         dep_id = dep["id"]
         id_leg = dep.get("idLegislatura")
         if not id_leg:
+            continue
+
+        if is_verified("camara_despesas", f"{dep_id}_{id_leg}"):
             continue
 
         anos = _anos_legislatura(id_leg)

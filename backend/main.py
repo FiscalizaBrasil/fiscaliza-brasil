@@ -17,12 +17,14 @@ from api.portal.router import router as portal_router
 from scripts.scraper import start_background_import, start_background_fotos, scraping_status
 from scripts.stats_refresh import start_stats_refresh
 from database.cache import get_cache_stats, invalidate_cache
+from scripts.scraper.verification import invalidate as invalidate_verification
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Limpando caches residuais...")
     invalidate_cache()
+    invalidate_verification()
     logger.info("Iniciando downloads em background...")
     start_background_fotos()
     start_background_import()
@@ -83,6 +85,7 @@ def invalidate_cache_endpoint(cache_name: str = None):
         cache_name: Nome do cache a invalidar. Se None, invalida todos.
     """
     invalidate_cache(cache_name)
+    invalidate_verification()
     return {"status": "ok", "invalidated": cache_name or "all"}
 
 

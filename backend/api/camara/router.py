@@ -1,9 +1,7 @@
 
 from fastapi import APIRouter, HTTPException, Query
 from datetime import date
-import psycopg2
 import logging
-import threading
 
 _log = logging.getLogger(__name__)
 
@@ -11,291 +9,11 @@ _log = logging.getLogger(__name__)
 import database.db as db
 from database.utils import get_maior_legislatura_camara, get_legislatura_atual, periodo_legislatura, get_foto_url_camara
 from database.cache import ttl_cache
-from scripts.import_data import import_all_data, import_despesas_camara, import_detalhes_deputados
-from scripts.scraper import fetch_despesas_deputado, fetch_despesas_todas_camara, fetch_emendas_parlamentar, fetch_detalhes_deputado
 
 router = APIRouter(
     prefix="/camara",
     tags=["Câmara"]
 )
-
-# Lock para evitar múltiplos downloads simultâneos da Câmara
-_camara_download_lock = threading.Lock()
-_camara_download_in_progress = False
-_despesas_downloading = set()
-_detalhes_downloading = set()
-_emendas_downloading = set()
-
-
-# ============================================================
-# Função auxiliar para baixar despesas sob demanda
-# ============================================================
-
-def _ensure_despesas_deputado(deputado_id: int, legislatura: int = None):
-    """
-    Verifica se existem despesas no banco para o deputado.
-    Se não houver, dispara o download prioritário em background.
-    """
-    with _camara_download_lock:
-        if deputado_id in _despesas_downloading:
-            return
-        _despesas_downloading.add(deputado_id)
-    
-    conn = None
-    try:
-        conn = db.get_db_connection()
-        if not conn:
-            return
-        
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) FROM camara.deputados_despesas WHERE mandato_id IN "
-                "(SELECT id FROM camara.deputados_mandatos WHERE deputado_id = %s)",
-                (deputado_id,)
-            )
-            count = cursor.fetchone()[0]
-            
-            if count == 0:
-                _log.info(f"Sem despesas no banco para deputado {deputado_id}. Disparando download prioritário...")
-                threading.Thread(
-                    target=_download_and_import_despesas,
-                    args=(deputado_id, legislatura),
-                    daemon=True
-                ).start()
-    except Exception as e:
-        _log.error(f"Erro ao verificar despesas do deputado {deputado_id}: {e}")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
-
-
-def _download_and_import_despesas(deputado_id: int, id_legislatura: int = None):
-    """
-    Baixa as despesas de um deputado e importa para o banco.
-    Executado em thread separada.
-    Também dispara download de emendas do mesmo deputado.
-    """
-    from scripts.scraper.camara import despesas as desp_mod
-    
-    try:
-        if id_legislatura is not None:
-            anos = desp_mod._anos_legislatura(id_legislatura)
-        else:
-            anos = None
-        
-        _log.info(f"Download prioritário: despesas do deputado {deputado_id} legislatura {id_legislatura or 'N/A'}")
-        fetch_despesas_deputado(deputado_id, anos=anos, id_legislatura=id_legislatura)
-        
-        # Importa para o banco (apenas este deputado)
-        conn = db.get_db_connection()
-        if conn:
-            try:
-                import_despesas_camara(conn, deputado_id=deputado_id)
-            finally:
-                db.release_db_connection(conn)
-        
-        _log.info(f"Download e importação concluídos para deputado {deputado_id}")
-        
-        # Também dispara download de emendas para este deputado
-        try:
-            # Busca o nome do deputado no JSON
-            import json, os
-            dep_path = os.path.join(os.path.dirname(__file__), "..", "data", "camara", "deputados.json")
-            if os.path.isfile(dep_path):
-                with open(dep_path, "r", encoding="utf-8") as f:
-                    dep_data = json.load(f)
-                for dep in dep_data.get("dados", []):
-                    if dep["id"] == deputado_id:
-                        nome = dep.get("nome", "")
-                        if nome:
-                            _log.info(f"Download prioritário: emendas do deputado {deputado_id} ({nome})")
-                            threading.Thread(
-                                target=_download_and_import_emendas_deputado,
-                                args=(deputado_id, nome),
-                                daemon=True
-                            ).start()
-                        break
-        except Exception as e:
-            _log.error(f"Erro ao disparar download de emendas para deputado {deputado_id}: {e}")
-            
-    except Exception as e:
-        _log.error(f"Erro no download prioritário do deputado {deputado_id}: {e}")
-    finally:
-        with _camara_download_lock:
-            _despesas_downloading.discard(deputado_id)
-
-
-def _download_and_import_camara_todas():
-    """
-    Baixa todas as despesas de todos os deputados da Câmara e importa para o banco.
-    Usa lock para evitar execução concorrente.
-    Executado em thread separada.
-    """
-    global _camara_download_in_progress
-    try:
-        _log.info("[CÂMARA] Download completo de despesas de todos os deputados...")
-        fetch_despesas_todas_camara()
-        
-        # Importa todos os deputados para o banco
-        conn = db.get_db_connection()
-        if conn:
-            try:
-                import_despesas_camara(conn)
-                _log.info("[CÂMARA] Despesas de todos os deputados importadas para o banco.")
-            except Exception as import_err:
-                _log.error(f"[CÂMARA] Erro ao importar despesas: {import_err}")
-            finally:
-                db.release_db_connection(conn)
-        
-        _log.info("[CÂMARA] Download e importação de todas as despesas concluídos.")
-    except Exception as e:
-        _log.error(f"[CÂMARA] Erro no download completo: {e}")
-    finally:
-        with _camara_download_lock:
-            _camara_download_in_progress = False
-
-
-
-
-def _ensure_detalhes_deputado(deputado_id: int):
-    """
-    Verifica se existem detalhes (situacao/condicao_eleitoral) no banco para o deputado.
-    Se não houver, dispara o download prioritário em background.
-    """
-    with _camara_download_lock:
-        if deputado_id in _detalhes_downloading:
-            return
-        _detalhes_downloading.add(deputado_id)
-    
-    conn = None
-    try:
-        conn = db.get_db_connection()
-        if not conn:
-            return
-        
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT COUNT(*) FROM camara.deputados_mandatos
-                WHERE deputado_id = %s AND condicao_eleitoral IS NULL
-            """, (deputado_id,))
-            count = cursor.fetchone()[0]
-            
-            if count > 0:
-                _log.info(f"Sem detalhes no banco para deputado {deputado_id}. Disparando download prioritário...")
-                threading.Thread(
-                    target=_download_and_import_detalhes,
-                    args=(deputado_id,),
-                    daemon=True
-                ).start()
-    except Exception as e:
-        _log.error(f"Erro ao verificar detalhes do deputado {deputado_id}: {e}")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
-
-
-def _download_and_import_detalhes(deputado_id: int):
-    """
-    Baixa os detalhes de um deputado e importa para o banco.
-    Executado em thread separada.
-    """
-    try:
-        _log.info(f"Download prioritário: detalhes do deputado {deputado_id}")
-        fetch_detalhes_deputado(deputado_id)
-        
-        # Importa para o banco (apenas este deputado)
-        conn = db.get_db_connection()
-        if conn:
-            try:
-                import_detalhes_deputados(conn, deputado_id=deputado_id)
-            finally:
-                db.release_db_connection(conn)
-        
-        _log.info(f"Download e importação de detalhes concluídos para deputado {deputado_id}")
-    except Exception as e:
-        _log.error(f"Erro no download prioritário de detalhes do deputado {deputado_id}: {e}")
-    finally:
-        with _camara_download_lock:
-            _detalhes_downloading.discard(deputado_id)
-
-
-def _ensure_emendas_deputado(deputado_id: int, nome_deputado: str):
-    """
-    Verifica se existem emendas no banco para o deputado.
-    Se não houver, dispara o download prioritário em background.
-    """
-    with _camara_download_lock:
-        if deputado_id in _emendas_downloading:
-            return
-        _emendas_downloading.add(deputado_id)
-    
-    conn = None
-    try:
-        conn = db.get_db_connection()
-        if not conn:
-            return
-        
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT COUNT(*) FROM portal.emendas e
-                JOIN (
-                    SELECT id, lower(nome_civil) as nome FROM camara.deputados
-                    UNION
-                    SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
-                ) d ON lower(e.autor) = d.nome
-                WHERE d.id = %s
-            """, (deputado_id,))
-            count = cursor.fetchone()[0]
-            
-            if count == 0:
-                _log.info(f"Sem emendas no banco para deputado {deputado_id} ({nome_deputado}). Disparando download prioritário...")
-                threading.Thread(
-                    target=_download_and_import_emendas_deputado,
-                    args=(deputado_id, nome_deputado),
-                    daemon=True
-                ).start()
-    except Exception as e:
-        _log.error(f"Erro ao verificar emendas do deputado {deputado_id}: {e}")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
-
-
-def _download_and_import_emendas_deputado(deputado_id: int, nome_deputado: str):
-    """
-    Baixa as emendas de um deputado e importa para o banco.
-    Executado em thread separada.
-    """
-    try:
-        _log.info(f"Download prioritário: emendas do deputado {deputado_id} ({nome_deputado})")
-        
-        # Busca todas as páginas de emendas para este deputado
-        pagina = 1
-        while True:
-            result = fetch_emendas_parlamentar(nome_deputado.upper(), pagina=pagina)
-            emendas = result.get("emendas", [])
-            if not emendas:
-                break
-            pagina += 1
-            if pagina > 50:
-                break
-        
-        # Importa para o banco (apenas emendas deste parlamentar)
-        from scripts.import_data import import_emendas
-        if import_emendas is not None:
-            conn = db.get_db_connection()
-            if conn:
-                try:
-                    import_emendas(conn, arquivo=nome_deputado)
-                    _log.info(f"Download e importação de emendas concluídos para deputado {deputado_id}")
-                finally:
-                    db.release_db_connection(conn)
-
-    except Exception as e:
-        _log.error(f"Erro no download prioritário de emendas do deputado {deputado_id}: {e}")
-    finally:
-        with _camara_download_lock:
-            _emendas_downloading.discard(deputado_id)
 
 
 @router.get("/legislaturas", summary="Lista todas as legislaturas disponíveis na base")
@@ -1189,16 +907,6 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
             cursor.execute(query_legis, (deputado_id,))
             legislaturas_ativas = [row[0] for row in cursor.fetchall()]
 
-            # 6. Dispara download de detalhes (situacao/condicao_eleitoral) se estiverem NULL
-            _ensure_detalhes_deputado(deputado_id)
-
-            # 7. Dispara download de emendas em background se não houver dados
-            if total_emendas == 0:
-                # Busca o nome do deputado para a busca de emendas
-                nome_deputado = res.get("nome_civil", "")
-                if nome_deputado:
-                    _ensure_emendas_deputado(deputado_id, nome_deputado)
-
             return {
                 **res,
                 "total_emendas": total_emendas,
@@ -1225,36 +933,6 @@ def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Quer
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
 
         with conn.cursor() as cursor:
-            # Verifica se existem despesas no banco; se não, dispara download prioritário
-            cursor.execute(
-                "SELECT COUNT(*) FROM camara.deputados_despesas WHERE mandato_id IN "
-                "(SELECT id FROM camara.deputados_mandatos WHERE deputado_id = %s)",
-                (deputado_id,)
-            )
-            count_despesas = cursor.fetchone()[0]
-            if count_despesas == 0:
-                # Dispara download prioritário em background (já inclui emendas)
-                _ensure_despesas_deputado(deputado_id, legislatura)
-            
-            # Também verifica emendas e dispara download se necessário
-            cursor.execute("""
-                SELECT COUNT(*) FROM portal.emendas e
-                JOIN (
-                    SELECT id, lower(nome_civil) as nome FROM camara.deputados
-                    UNION
-                    SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
-                ) d ON lower(e.autor) = d.nome
-                WHERE d.id = %s
-            """, (deputado_id,))
-            count_emendas = cursor.fetchone()[0]
-            if count_emendas == 0:
-                # Busca o nome do deputado para disparar download de emendas
-                cursor.execute("SELECT nome_civil FROM camara.deputados WHERE id = %s", (deputado_id,))
-                nome_row = cursor.fetchone()
-                if nome_row and nome_row[0]:
-                    _ensure_emendas_deputado(deputado_id, nome_row[0])
-
-
             query_count = """
                 SELECT COUNT(*)
                 FROM camara.deputados_despesas AS desp
@@ -1714,18 +1392,6 @@ def get_resumo_principal_camara(legislatura: int = 0):
                 maior_leg = get_maior_legislatura_camara(conn)
             
             if maior_leg is None:
-                # Tenta importar dados dos JSONs baixados pelo scraper
-                _log.info("Banco vazio detectado. Tentando importar dados dos arquivos JSON...")
-                try:
-                    import_all_data(conn)
-                    _log.info("Importação concluída. Refazendo consulta...")
-                except Exception as import_err:
-                    _log.error(f"Erro ao importar dados: {import_err}")
-                
-                with conn.cursor() as cursor:
-                    maior_leg = get_maior_legislatura_camara(conn)
-            
-            if maior_leg is None:
                 return {
                     "total_parlamentares": 0,
                     "gastos_12_meses": 0.0,
@@ -1768,18 +1434,6 @@ def get_resumo_principal_camara(legislatura: int = 0):
             gastos_12_meses = float(cursor.fetchone()[0] or 0)
 
             db_vazio = total_deputados == 0
-
-            # Se tem deputados mas não tem gastos, dispara download prioritário em background
-            if not db_vazio and gastos_12_meses == 0:
-                _log.info("Resumo: deputados encontrados mas sem despesas. Disparando download prioritário...")
-                global _camara_download_in_progress
-                with _camara_download_lock:
-                    if not _camara_download_in_progress:
-                        _camara_download_in_progress = True
-                        threading.Thread(
-                            target=_download_and_import_camara_todas,
-                            daemon=True
-                        ).start()
 
             return {
                 "total_parlamentares": total_deputados,

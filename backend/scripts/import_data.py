@@ -21,6 +21,7 @@ try:
     from database import db
     from scripts.scraper.cache import is_cache_valid, save_json
     from scripts.scraper.rate_limiter import senado_legis_limiter
+    from scripts.scraper.verification import mark_verified
 except ImportError as e:
     logging.error(f"Error importing database module: {e}")
     sys.exit(1)
@@ -693,6 +694,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                             leg_dir = os.path.join(dep_dir, leg_str)
                             mandato_id = mandato_por_legislatura.get(leg_id, mandato_fallback)
                             
+                            json_count_leg = 0
                             for fname in sorted(os.listdir(leg_dir)):
                                 if not fname.endswith(".json"):
                                     continue
@@ -702,9 +704,20 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                                 dados = data.get("dados", [])
                                 if not dados:
                                     continue
+                                json_count_leg += len(dados)
                                 for despesa in dados:
                                     inseridos_dep += _inserir_despesa(cursor, despesa, mandato_id)
                                 conn.commit()
+                            
+                            cursor.execute(
+                                "SELECT COUNT(*) FROM camara.deputados_despesas dd "
+                                "JOIN camara.deputados_mandatos dm ON dm.id = dd.mandato_id "
+                                "WHERE dm.deputado_id = %s AND dm.legislatura_id = %s",
+                                (dep_id, leg_id),
+                            )
+                            db_count_leg = cursor.fetchone()[0]
+                            if json_count_leg > 0 and json_count_leg == db_count_leg:
+                                mark_verified("camara_despesas", f"{dep_id}_{leg_id}", json_count_leg, db_count_leg)
                     else:
                         # === FORMATO ANTIGO: despesas/{dep_id}/{ano}_pagina{n}.json (backward compat) ===
                         for fname in sorted(dir_contents):
@@ -1223,6 +1236,15 @@ def import_despesas_senado(conn, ano: int = None) -> Optional[bool]:
                         if inseridos_arquivo > 0:
                             logging.info(f"Arquivo {fname}: {inseridos_arquivo} despesas importadas.")
                         _despesas_senado_importadas.add(ano_arquivo)
+                        
+                        json_count = len(despesas_lista)
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM senado.despesa_ceaps WHERE ano = %s",
+                            (ano_arquivo,),
+                        )
+                        db_count = cursor.fetchone()[0]
+                        if json_count > 0 and json_count == db_count:
+                            mark_verified("senado_despesas", str(ano_arquivo), json_count, db_count)
             except Exception as e:
                 logging.error(f"Erro ao processar arquivo {fname}: {e}")
                 conn.rollback()
@@ -1340,6 +1362,13 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
                 total_inseridos += inseridos_dep
                 if inseridos_dep > 0:
                     logging.info(f"Histórico do deputado {dep_id}: {inseridos_dep} eventos importados.")
+                cursor.execute(
+                    "SELECT COUNT(*) FROM camara.deputados_historico WHERE deputado_id = %s",
+                    (dep_id,),
+                )
+                db_count = cursor.fetchone()[0]
+                if len(eventos) > 0 and len(eventos) == db_count:
+                    mark_verified("camara_historico", str(dep_id), len(eventos), db_count)
                 continue
             
             logging.warning(f"Histórico do deputado {dep_id}: importação interrompida devido a erro.")
@@ -1428,6 +1457,13 @@ def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
                     total_atualizados += cursor.rowcount
                     logging.info(f"Detalhes do deputado {dep_id}: {cursor.rowcount} mandatos atualizados (situacao={situacao}, condicao={condicao})")
                 cursor.execute("RELEASE SAVEPOINT sp_detdep")
+                cursor.execute(
+                    "SELECT COUNT(*) FROM camara.deputados_mandatos WHERE deputado_id = %s AND condicao_eleitoral IS NOT NULL",
+                    (dep_id,),
+                )
+                db_count = cursor.fetchone()[0]
+                if db_count > 0:
+                    mark_verified("camara_detalhes", str(dep_id), 1, db_count)
             except Exception as e:
                 logging.error(f"Erro ao atualizar detalhes do deputado {dep_id}: {e}")
                 cursor.execute("ROLLBACK TO SAVEPOINT sp_detdep")
@@ -1895,26 +1931,39 @@ def import_emendas(conn, arquivo: str = None) -> Optional[bool]:
         # Modo completo: processa todos os arquivos
         arquivos = sorted(os.listdir(emendas_dir))
     
+    json_counts_by_prefix = {}
+    autor_por_prefix = {}
+
     with conn.cursor() as cursor:
         for fname in arquivos:
             if not fname.endswith(".json"):
                 continue
-            
+
             # Extrai o prefixo do nome do arquivo (ex: "ERIKA_HILTON" de "ERIKA_HILTON_pagina1.json")
             prefixo_arquivo = fname.rsplit("_pagina", 1)[0]
             if prefixo_arquivo in _emendas_importadas:
                 continue  # Já importado nesta sessão
-            
+
             filepath = os.path.join(emendas_dir, fname)
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             emendas_lista = data.get("emendas", [])
             if not emendas_lista:
                 continue
-            
+
+            # Parlamentar prefix (sem ano) para agrupar verificacao
+            parts = prefixo_arquivo.rsplit('_', 1)
+            if len(parts) == 2 and len(parts[1]) == 4 and parts[1].isdigit():
+                parlamentar_prefix = parts[0]
+            else:
+                parlamentar_prefix = prefixo_arquivo
+
+            if parlamentar_prefix not in autor_por_prefix:
+                autor_por_prefix[parlamentar_prefix] = emendas_lista[0].get("nomeAutor", "")
+
             inseridos_arquivo = 0
-            
+
             for emenda in emendas_lista:
                 cursor.execute("SAVEPOINT sp_emenda")
                 try:
@@ -1956,10 +2005,28 @@ def import_emendas(conn, arquivo: str = None) -> Optional[bool]:
                 if inseridos_arquivo > 0:
                     logging.info(f"Arquivo {fname}: {inseridos_arquivo} emendas importadas.")
                 _emendas_importadas.add(prefixo_arquivo)
+                json_counts_by_prefix[parlamentar_prefix] = json_counts_by_prefix.get(parlamentar_prefix, 0) + len(emendas_lista)
                 continue
-            
+
             # Se chegou aqui, houve break por erro
             logging.warning(f"Arquivo {fname}: importação interrompida devido a erro.")
+
+        for parlamentar_prefix, json_count in json_counts_by_prefix.items():
+            if json_count == 0:
+                continue
+            nome_autor = autor_por_prefix.get(parlamentar_prefix, "")
+            if not nome_autor:
+                continue
+            try:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM portal.emendas WHERE lower(autor) = lower(%s)",
+                    (nome_autor,),
+                )
+                db_count = cursor.fetchone()[0]
+                if json_count > 0 and json_count == db_count:
+                    mark_verified("portal_emendas", parlamentar_prefix, json_count, db_count)
+            except Exception:
+                pass
     
     if total_inseridos > 0 or arquivo is None:
         logging.info(f"Importação de emendas concluída. {total_inseridos} registros inseridos.")
