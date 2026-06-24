@@ -61,4 +61,16 @@ def db_cursor():
     finally:
         release_db_connection(conn)
 
+
+@contextmanager
+def savepoint(cursor, name: str):
+    """Context manager para SAVEPOINT/RELEASE/ROLLBACK em operações atômicas."""
+    cursor.execute(f"SAVEPOINT {name}")
+    try:
+        yield
+        cursor.execute(f"RELEASE SAVEPOINT {name}")
+    except Exception:
+        cursor.execute(f"ROLLBACK TO {name}")
+        raise
+
       

@@ -19,6 +19,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 try:
     from database import db
+    from database.db import savepoint
     from database.utils import legislatura_anos
     from scripts.scraper.cache import is_cache_valid, save_json
     from scripts.scraper.rate_limiter import senado_legis_limiter
@@ -485,38 +486,37 @@ def _inserir_despesa(cursor, despesa: dict, mandato_id: str) -> int:
         except (ValueError, TypeError):
             valor_glosa = 0
 
-    cursor.execute("SAVEPOINT sp_camara_despesa")
-    cursor.execute("""
-        INSERT INTO camara.deputados_despesas
-            (ano, mes, tipo_despesa, cod_documento, tipo_documento,
-             cod_tipo_documento, data_documento, num_documento,
-             valor_documento, url_documento, nome_fornecedor,
-             cnpj_cpf_fornecedor, valor_liquido, valor_glosa,
-             num_ressarcimento, cod_lote, parcela, mandato_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (cod_documento, num_documento, data_documento, valor_documento, nome_fornecedor) 
-        DO NOTHING
-    """, (
-        despesa.get("ano"),
-        despesa.get("mes"),
-        despesa.get("tipoDespesa", ""),
-        despesa.get("codDocumento"),
-        despesa.get("tipoDocumento"),
-        despesa.get("codTipoDocumento"),
-        despesa.get("dataDocumento"),
-        despesa.get("numDocumento"),
-        valor_documento,
-        despesa.get("urlDocumento"),
-        despesa.get("nomeFornecedor", ""),
-        despesa.get("cnpjCpfFornecedor"),
-        valor_liquido,
-        valor_glosa,
-        despesa.get("numRessarcimento"),
-        despesa.get("codLote", 0),
-        despesa.get("parcela", 0),
-        mandato_id
-    ))
-    cursor.execute("RELEASE SAVEPOINT sp_camara_despesa")
+    with savepoint(cursor, "sp_camara_despesa"):
+        cursor.execute("""
+            INSERT INTO camara.deputados_despesas
+                (ano, mes, tipo_despesa, cod_documento, tipo_documento,
+                 cod_tipo_documento, data_documento, num_documento,
+                 valor_documento, url_documento, nome_fornecedor,
+                 cnpj_cpf_fornecedor, valor_liquido, valor_glosa,
+                 num_ressarcimento, cod_lote, parcela, mandato_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (cod_documento, num_documento, data_documento, valor_documento, nome_fornecedor) 
+            DO NOTHING
+        """, (
+            despesa.get("ano"),
+            despesa.get("mes"),
+            despesa.get("tipoDespesa", ""),
+            despesa.get("codDocumento"),
+            despesa.get("tipoDocumento"),
+            despesa.get("codTipoDocumento"),
+            despesa.get("dataDocumento"),
+            despesa.get("numDocumento"),
+            valor_documento,
+            despesa.get("urlDocumento"),
+            despesa.get("nomeFornecedor", ""),
+            despesa.get("cnpjCpfFornecedor"),
+            valor_liquido,
+            valor_glosa,
+            despesa.get("numRessarcimento"),
+            despesa.get("codLote", 0),
+            despesa.get("parcela", 0),
+            mandato_id
+        ))
     return 1 if cursor.rowcount > 0 else 0
 
 
@@ -1199,35 +1199,33 @@ def import_despesas_senado(conn, ano: int = None) -> Optional[bool]:
                                     continue
 
                             
-                            cursor.execute("SAVEPOINT sp_senado_despesa")
-                            cursor.execute("""
-                                INSERT INTO senado.despesa_ceaps
-                                    (ano, mes, cod_senador, nome_senador, tipo_despesa,
-                                     cpf_cnpj, fornecedor, documento, data_despesa,
-                                     detalhamento, valor_reembolsado, tipo_documento)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                ON CONFLICT (ano, mes, cod_senador, documento, valor_reembolsado, fornecedor) 
-                                DO NOTHING
-                            """, (
-                                despesa.get("ano"),
-                                despesa.get("mes"),
-                                cod_senador,
-                                despesa.get("nomeParlamentar") or despesa.get("nomeSenador", ""),
-                                despesa.get("tipoDespesa", ""),
-                                despesa.get("cpfCnpj"),
-                                despesa.get("fornecedor", ""),
-                                despesa.get("documento"),
-                                despesa.get("dataDespesa") or despesa.get("data"),
-                                despesa.get("detalhamento"),
-                                despesa.get("valorReembolsado", 0),
-                                despesa.get("tipoDocumento")
-                            ))
-                            cursor.execute("RELEASE SAVEPOINT sp_senado_despesa")
+                            with savepoint(cursor, "sp_senado_despesa"):
+                                cursor.execute("""
+                                    INSERT INTO senado.despesa_ceaps
+                                        (ano, mes, cod_senador, nome_senador, tipo_despesa,
+                                         cpf_cnpj, fornecedor, documento, data_despesa,
+                                         detalhamento, valor_reembolsado, tipo_documento)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    ON CONFLICT (ano, mes, cod_senador, documento, valor_reembolsado, fornecedor) 
+                                    DO NOTHING
+                                """, (
+                                    despesa.get("ano"),
+                                    despesa.get("mes"),
+                                    cod_senador,
+                                    despesa.get("nomeParlamentar") or despesa.get("nomeSenador", ""),
+                                    despesa.get("tipoDespesa", ""),
+                                    despesa.get("cpfCnpj"),
+                                    despesa.get("fornecedor", ""),
+                                    despesa.get("documento"),
+                                    despesa.get("dataDespesa") or despesa.get("data"),
+                                    despesa.get("detalhamento"),
+                                    despesa.get("valorReembolsado", 0),
+                                    despesa.get("tipoDocumento")
+                                ))
                             if cursor.rowcount > 0:
                                 inseridos_arquivo += 1
                         except Exception as e:
                             logging.error(f"Erro ao inserir despesa do senado (ano={despesa.get('ano')}, doc={despesa.get('documento')}): {e}")
-                            cursor.execute("ROLLBACK TO SAVEPOINT sp_senado_despesa")
                             continue
                     else:
                         conn.commit()
@@ -1323,38 +1321,35 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
             inseridos_dep = 0
             
             for evento in eventos:
-                cursor.execute("SAVEPOINT sp_hist")
                 try:
                     data_hora = evento.get("dataHora")
                     if not data_hora:
-                        cursor.execute("RELEASE SAVEPOINT sp_hist")
                         continue
                     
-                    cursor.execute("""
-                        INSERT INTO camara.deputados_historico
-                            (deputado_id, data_hora, situacao, condicao_eleitoral,
-                             descricao_status, sigla_partido, sigla_uf,
-                             nome_eleitoral, url_foto, id_legislatura)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (deputado_id, data_hora) DO NOTHING
-                    """, (
-                        dep_id,
-                        data_hora,
-                        evento.get("situacao"),
-                        evento.get("condicaoEleitoral"),
-                        evento.get("descricaoStatus"),
-                        evento.get("siglaPartido"),
-                        evento.get("siglaUf"),
-                        evento.get("nomeEleitoral"),
-                        evento.get("urlFoto"),
-                        evento.get("idLegislatura")
-                    ))
+                    with savepoint(cursor, "sp_hist"):
+                        cursor.execute("""
+                            INSERT INTO camara.deputados_historico
+                                (deputado_id, data_hora, situacao, condicao_eleitoral,
+                                 descricao_status, sigla_partido, sigla_uf,
+                                 nome_eleitoral, url_foto, id_legislatura)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (deputado_id, data_hora) DO NOTHING
+                        """, (
+                            dep_id,
+                            data_hora,
+                            evento.get("situacao"),
+                            evento.get("condicaoEleitoral"),
+                            evento.get("descricaoStatus"),
+                            evento.get("siglaPartido"),
+                            evento.get("siglaUf"),
+                            evento.get("nomeEleitoral"),
+                            evento.get("urlFoto"),
+                            evento.get("idLegislatura")
+                        ))
                     if cursor.rowcount > 0:
                         inseridos_dep += 1
-                    cursor.execute("RELEASE SAVEPOINT sp_hist")
                 except Exception as e:
                     logging.error(f"Erro ao inserir histórico do deputado {dep_id} (data={evento.get('dataHora')}): {e}")
-                    cursor.execute("ROLLBACK TO SAVEPOINT sp_hist")
                     continue
             else:
                 conn.commit()
@@ -1440,22 +1435,21 @@ def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
             if not situacao and not condicao:
                 continue
             
-            cursor.execute("SAVEPOINT sp_detdep")
             try:
-                # Atualiza TODOS os mandatos deste deputado com os mesmos dados
-                cursor.execute("""
-                    UPDATE camara.deputados_mandatos
-                    SET situacao = %s,
-                        condicao_eleitoral = %s
-                    WHERE deputado_id = %s
-                      AND (situacao IS DISTINCT FROM %s
-                        OR condicao_eleitoral IS DISTINCT FROM %s)
-                """, (situacao, condicao, dep_id, situacao, condicao))
+                with savepoint(cursor, "sp_detdep"):
+                    # Atualiza TODOS os mandatos deste deputado com os mesmos dados
+                    cursor.execute("""
+                        UPDATE camara.deputados_mandatos
+                        SET situacao = %s,
+                            condicao_eleitoral = %s
+                        WHERE deputado_id = %s
+                          AND (situacao IS DISTINCT FROM %s
+                            OR condicao_eleitoral IS DISTINCT FROM %s)
+                    """, (situacao, condicao, dep_id, situacao, condicao))
                 
                 if cursor.rowcount > 0:
                     total_atualizados += cursor.rowcount
                     logging.info(f"Detalhes do deputado {dep_id}: {cursor.rowcount} mandatos atualizados (situacao={situacao}, condicao={condicao})")
-                cursor.execute("RELEASE SAVEPOINT sp_detdep")
                 cursor.execute(
                     "SELECT COUNT(*) FROM camara.deputados_mandatos WHERE deputado_id = %s AND condicao_eleitoral IS NOT NULL",
                     (dep_id,),
@@ -1465,7 +1459,6 @@ def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
                     mark_verified("camara_detalhes", str(dep_id), 1, db_count)
             except Exception as e:
                 logging.error(f"Erro ao atualizar detalhes do deputado {dep_id}: {e}")
-                cursor.execute("ROLLBACK TO SAVEPOINT sp_detdep")
                 continue
         
         conn.commit()
@@ -1535,36 +1528,34 @@ def import_proposicoes_camara(conn, ano: int = None) -> Optional[bool]:
             inseridos_arquivo = 0
             
             for prop in dados:
-                cursor.execute("SAVEPOINT sp_prop")
                 try:
-                    cursor.execute("""
-                        INSERT INTO camara.proposicoes
-                            (id, sigla_tipo, cod_tipo, numero, ano, ementa, data_apresentacao, uri)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            sigla_tipo = EXCLUDED.sigla_tipo,
-                            cod_tipo = EXCLUDED.cod_tipo,
-                            numero = EXCLUDED.numero,
-                            ano = EXCLUDED.ano,
-                            ementa = EXCLUDED.ementa,
-                            data_apresentacao = EXCLUDED.data_apresentacao,
-                            uri = EXCLUDED.uri
-                    """, (
-                        prop.get("id"),
-                        prop.get("siglaTipo"),
-                        prop.get("codTipo"),
-                        prop.get("numero"),
-                        prop.get("ano"),
-                        prop.get("ementa"),
-                        prop.get("dataApresentacao"),
-                        prop.get("uri")
-                    ))
+                    with savepoint(cursor, "sp_prop"):
+                        cursor.execute("""
+                            INSERT INTO camara.proposicoes
+                                (id, sigla_tipo, cod_tipo, numero, ano, ementa, data_apresentacao, uri)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (id) DO UPDATE SET
+                                sigla_tipo = EXCLUDED.sigla_tipo,
+                                cod_tipo = EXCLUDED.cod_tipo,
+                                numero = EXCLUDED.numero,
+                                ano = EXCLUDED.ano,
+                                ementa = EXCLUDED.ementa,
+                                data_apresentacao = EXCLUDED.data_apresentacao,
+                                uri = EXCLUDED.uri
+                        """, (
+                            prop.get("id"),
+                            prop.get("siglaTipo"),
+                            prop.get("codTipo"),
+                            prop.get("numero"),
+                            prop.get("ano"),
+                            prop.get("ementa"),
+                            prop.get("dataApresentacao"),
+                            prop.get("uri")
+                        ))
                     if cursor.rowcount > 0:
                         inseridos_arquivo += 1
-                    cursor.execute("RELEASE SAVEPOINT sp_prop")
                 except Exception as e:
                     logging.error(f"Erro ao inserir proposição {prop.get('id')}: {e}")
-                    cursor.execute("ROLLBACK TO SAVEPOINT sp_prop")
                     continue
             else:
                 conn.commit()
@@ -1619,36 +1610,34 @@ def import_proposicoes_deputado(conn, deputado_id: int) -> Optional[bool]:
             inseridos_arquivo = 0
             
             for prop in dados:
-                cursor.execute("SAVEPOINT sp_propdep")
                 try:
-                    cursor.execute("""
-                        INSERT INTO camara.proposicoes
-                            (id, sigla_tipo, cod_tipo, numero, ano, ementa, data_apresentacao, uri)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            sigla_tipo = EXCLUDED.sigla_tipo,
-                            cod_tipo = EXCLUDED.cod_tipo,
-                            numero = EXCLUDED.numero,
-                            ano = EXCLUDED.ano,
-                            ementa = EXCLUDED.ementa,
-                            data_apresentacao = EXCLUDED.data_apresentacao,
-                            uri = EXCLUDED.uri
-                    """, (
-                        prop.get("id"),
-                        prop.get("siglaTipo"),
-                        prop.get("codTipo"),
-                        prop.get("numero"),
-                        prop.get("ano"),
-                        prop.get("ementa"),
-                        prop.get("dataApresentacao"),
-                        prop.get("uri")
-                    ))
+                    with savepoint(cursor, "sp_propdep"):
+                        cursor.execute("""
+                            INSERT INTO camara.proposicoes
+                                (id, sigla_tipo, cod_tipo, numero, ano, ementa, data_apresentacao, uri)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (id) DO UPDATE SET
+                                sigla_tipo = EXCLUDED.sigla_tipo,
+                                cod_tipo = EXCLUDED.cod_tipo,
+                                numero = EXCLUDED.numero,
+                                ano = EXCLUDED.ano,
+                                ementa = EXCLUDED.ementa,
+                                data_apresentacao = EXCLUDED.data_apresentacao,
+                                uri = EXCLUDED.uri
+                        """, (
+                            prop.get("id"),
+                            prop.get("siglaTipo"),
+                            prop.get("codTipo"),
+                            prop.get("numero"),
+                            prop.get("ano"),
+                            prop.get("ementa"),
+                            prop.get("dataApresentacao"),
+                            prop.get("uri")
+                        ))
                     if cursor.rowcount > 0:
                         inseridos_arquivo += 1
-                    cursor.execute("RELEASE SAVEPOINT sp_propdep")
                 except Exception as e:
                     logging.error(f"Erro ao inserir proposição {prop.get('id')} do deputado {deputado_id}: {e}")
-                    cursor.execute("ROLLBACK TO SAVEPOINT sp_propdep")
                     continue
             else:
                 conn.commit()
@@ -1748,7 +1737,6 @@ def import_votacoes_camara(conn, ano: int = None) -> Optional[bool]:
             inseridos_arquivo = 0
 
             for vot in dados:
-                cursor.execute("SAVEPOINT sp_vot")
                 try:
                     id_orgao = None
                     uri_orgao = vot.get("uriOrgao")
@@ -1766,57 +1754,56 @@ def import_votacoes_camara(conn, ano: int = None) -> Optional[bool]:
                         except (ValueError, IndexError):
                             pass
 
-                    cursor.execute("""
-                        INSERT INTO camara.votacoes
-                            (id, uri, data, data_hora_registro, sigla_orgao,
-                             uri_orgao, id_orgao, uri_evento, id_evento,
-                             descricao, aprovacao)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            uri = EXCLUDED.uri,
-                            data = EXCLUDED.data,
-                            data_hora_registro = EXCLUDED.data_hora_registro,
-                            sigla_orgao = EXCLUDED.sigla_orgao,
-                            uri_orgao = EXCLUDED.uri_orgao,
-                            id_orgao = EXCLUDED.id_orgao,
-                            uri_evento = EXCLUDED.uri_evento,
-                            id_evento = EXCLUDED.id_evento,
-                            descricao = EXCLUDED.descricao,
-                            aprovacao = EXCLUDED.aprovacao
-                    """, (
-                        vot.get("id"),
-                        vot.get("uri"),
-                        vot.get("data"),
-                        vot.get("dataHoraRegistro"),
-                        vot.get("siglaOrgao"),
-                        vot.get("uriOrgao"),
-                        id_orgao,
-                        vot.get("uriEvento"),
-                        id_evento,
-                        vot.get("descricao"),
-                        vot.get("aprovacao"),
-                    ))
+                    with savepoint(cursor, "sp_vot"):
+                        cursor.execute("""
+                            INSERT INTO camara.votacoes
+                                (id, uri, data, data_hora_registro, sigla_orgao,
+                                 uri_orgao, id_orgao, uri_evento, id_evento,
+                                 descricao, aprovacao)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (id) DO UPDATE SET
+                                uri = EXCLUDED.uri,
+                                data = EXCLUDED.data,
+                                data_hora_registro = EXCLUDED.data_hora_registro,
+                                sigla_orgao = EXCLUDED.sigla_orgao,
+                                uri_orgao = EXCLUDED.uri_orgao,
+                                id_orgao = EXCLUDED.id_orgao,
+                                uri_evento = EXCLUDED.uri_evento,
+                                id_evento = EXCLUDED.id_evento,
+                                descricao = EXCLUDED.descricao,
+                                aprovacao = EXCLUDED.aprovacao
+                        """, (
+                            vot.get("id"),
+                            vot.get("uri"),
+                            vot.get("data"),
+                            vot.get("dataHoraRegistro"),
+                            vot.get("siglaOrgao"),
+                            vot.get("uriOrgao"),
+                            id_orgao,
+                            vot.get("uriEvento"),
+                            id_evento,
+                            vot.get("descricao"),
+                            vot.get("aprovacao"),
+                        ))
 
-                    proposicao_id = vot.get("proposicaoObjeto")
-                    if proposicao_id is not None:
-                        try:
-                            cursor.execute("""
-                                INSERT INTO camara.votacoes_proposicoes
-                                    (votacao_id, proposicao_id)
-                                VALUES (%s, %s)
-                                ON CONFLICT (votacao_id, proposicao_id) DO NOTHING
-                            """, (
-                                vot.get("id"),
-                                proposicao_id,
-                            ))
-                        except Exception:
-                            pass
+                        proposicao_id = vot.get("proposicaoObjeto")
+                        if proposicao_id is not None:
+                            try:
+                                cursor.execute("""
+                                    INSERT INTO camara.votacoes_proposicoes
+                                        (votacao_id, proposicao_id)
+                                    VALUES (%s, %s)
+                                    ON CONFLICT (votacao_id, proposicao_id) DO NOTHING
+                                """, (
+                                    vot.get("id"),
+                                    proposicao_id,
+                                ))
+                            except Exception:
+                                pass
 
                     inseridos_arquivo += 1
-                    cursor.execute("RELEASE SAVEPOINT sp_vot")
                 except Exception as e:
                     logging.error(f"Erro ao inserir votação {vot.get('id')}: {e}")
-                    cursor.execute("ROLLBACK TO SAVEPOINT sp_vot")
                     continue
             else:
                 conn.commit()
@@ -1871,27 +1858,25 @@ def import_detalhes_proposicoes(conn, ano: int = None) -> bool:
             if not dados:
                 continue
             
-            cursor.execute("SAVEPOINT sp_detprop")
             try:
-                status = dados.get("statusProposicao", {}) or {}
-                
-                cursor.execute("""
-                    UPDATE camara.proposicoes SET
-                        descricao_tipo = COALESCE(%s, descricao_tipo),
-                        ementa_detalhada = COALESCE(%s, ementa_detalhada),
-                        keywords = COALESCE(%s, keywords),
-                        url_inteiro_teor = COALESCE(%s, url_inteiro_teor),
-                        urn_final = COALESCE(%s, urn_final),
-                        texto = COALESCE(%s, texto),
-                        justificativa = COALESCE(%s, justificativa),
-                        uri_orgao_numerador = COALESCE(%s, uri_orgao_numerador),
-                        uri_prop_principal = COALESCE(%s, uri_prop_principal),
-                        uri_prop_anterior = COALESCE(%s, uri_prop_anterior),
-                        uri_prop_posterior = COALESCE(%s, uri_prop_posterior)
-                    WHERE id = %s
-                """, (
-                    dados.get("descricaoTipo"),
-                    dados.get("ementaDetalhada"),
+                with savepoint(cursor, "sp_detprop"):
+                    cursor.execute("""
+                        UPDATE camara.proposicoes SET
+                            descricao_tipo = COALESCE(%s, descricao_tipo),
+                            ementa_detalhada = COALESCE(%s, ementa_detalhada),
+                            keywords = COALESCE(%s, keywords),
+                            url_inteiro_teor = COALESCE(%s, url_inteiro_teor),
+                            urn_final = COALESCE(%s, urn_final),
+                            texto = COALESCE(%s, texto),
+                            justificativa = COALESCE(%s, justificativa),
+                            uri_orgao_numerador = COALESCE(%s, uri_orgao_numerador),
+                            uri_prop_principal = COALESCE(%s, uri_prop_principal),
+                            uri_prop_anterior = COALESCE(%s, uri_prop_anterior),
+                            uri_prop_posterior = COALESCE(%s, uri_prop_posterior)
+                        WHERE id = %s
+                    """, (
+                        dados.get("descricaoTipo"),
+                        dados.get("ementaDetalhada"),
                     dados.get("keywords"),
                     dados.get("urlInteiroTeor"),
                     dados.get("urnFinal"),
@@ -1905,10 +1890,8 @@ def import_detalhes_proposicoes(conn, ano: int = None) -> bool:
                 ))
                 if cursor.rowcount > 0:
                     total_atualizados += 1
-                cursor.execute("RELEASE SAVEPOINT sp_detprop")
             except Exception as e:
                 logging.error(f"Erro ao atualizar detalhes da proposição {prop_id}: {e}")
-                cursor.execute("ROLLBACK TO SAVEPOINT sp_detprop")
                 continue
         
         conn.commit()
@@ -1961,53 +1944,51 @@ def import_autores_proposicoes(conn, ano: int = None) -> bool:
             inseridos_prop = 0
             
             for autor in autores_lista:
-                cursor.execute("SAVEPOINT sp_autor")
                 try:
-                    uri = autor.get("uri", "")
-                    nome = autor.get("nome", "")
-                    cod_tipo = autor.get("codTipo")
-                    tipo = autor.get("tipo", "")
-                    ordem = autor.get("ordemAssinatura")
-                    proponente = autor.get("proponente", 0)
-                    
-                    # Tenta identificar se é um deputado pela URI
-                    deputado_id = None
-                    if "/deputados/" in uri:
-                        # Extrai o ID do deputado da URI
-                        try:
-                            deputado_id = int(uri.split("/deputados/")[-1].split("/")[0].split("?")[0])
-                        except (ValueError, IndexError):
-                            pass
-                    
-                    # Se não encontrou pela URI, tenta pelo nome
-                    if deputado_id is None and nome:
+                    with savepoint(cursor, "sp_autor"):
+                        uri = autor.get("uri", "")
+                        nome = autor.get("nome", "")
+                        cod_tipo = autor.get("codTipo")
+                        tipo = autor.get("tipo", "")
+                        ordem = autor.get("ordemAssinatura")
+                        proponente = autor.get("proponente", 0)
+                        
+                        # Tenta identificar se é um deputado pela URI
+                        deputado_id = None
+                        if "/deputados/" in uri:
+                            # Extrai o ID do deputado da URI
+                            try:
+                                deputado_id = int(uri.split("/deputados/")[-1].split("/")[0].split("?")[0])
+                            except (ValueError, IndexError):
+                                pass
+                        
+                        # Se não encontrou pela URI, tenta pelo nome
+                        if deputado_id is None and nome:
+                            cursor.execute("""
+                                SELECT id FROM camara.deputados 
+                                WHERE nome_civil ILIKE %s 
+                                LIMIT 1
+                            """, (nome.strip(),))
+                            row = cursor.fetchone()
+                            if row:
+                                deputado_id = row[0]
+                        
                         cursor.execute("""
-                            SELECT id FROM camara.deputados 
-                            WHERE nome_civil ILIKE %s 
-                            LIMIT 1
-                        """, (nome.strip(),))
-                        row = cursor.fetchone()
-                        if row:
-                            deputado_id = row[0]
-                    
-                    cursor.execute("""
-                        INSERT INTO camara.proposicoes_autores
-                            (proposicao_id, deputado_id, tipo_autor, ordem_assinatura, proponente)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (proposicao_id, deputado_id) DO NOTHING
-                    """, (
-                        prop_id,
-                        deputado_id,
-                        tipo,
-                        ordem,
-                        bool(proponente)
-                    ))
+                            INSERT INTO camara.proposicoes_autores
+                                (proposicao_id, deputado_id, tipo_autor, ordem_assinatura, proponente)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (proposicao_id, deputado_id) DO NOTHING
+                        """, (
+                            prop_id,
+                            deputado_id,
+                            tipo,
+                            ordem,
+                            bool(proponente)
+                        ))
                     if cursor.rowcount > 0:
                         inseridos_prop += 1
-                    cursor.execute("RELEASE SAVEPOINT sp_autor")
                 except Exception as e:
                     logging.error(f"Erro ao inserir autor da proposição {prop_id}: {e}")
-                    cursor.execute("ROLLBACK TO SAVEPOINT sp_autor")
                     continue
             else:
                 conn.commit()
@@ -2133,39 +2114,37 @@ def import_emendas(conn, arquivo: str = None) -> Optional[bool]:
             inseridos_arquivo = 0
 
             for emenda in emendas_lista:
-                cursor.execute("SAVEPOINT sp_emenda")
                 try:
-                    cursor.execute("""
-                        INSERT INTO portal.emendas
-                            (codigo_emenda, ano, tipo_emenda, autor, nome_autor,
-                             numero_emenda, localidade_gasto, funcao, subfuncao,
-                             valor_empenhado, valor_liquidado, valor_pago,
-                             valor_resto_inscrito, valor_resto_cancelado, valor_resto_pago)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT DO NOTHING
-                    """, (
-                        emenda.get("codigoEmenda"),
-                        emenda.get("ano"),
-                        emenda.get("tipoEmenda"),
-                        emenda.get("nomeAutor", ""),
-                        emenda.get("nomeAutor", ""),
-                        emenda.get("numeroEmenda"),
-                        emenda.get("localidadeDoGasto"),
-                        emenda.get("funcao"),
-                        emenda.get("subfuncao"),
-                        _parse_br_number(emenda.get("valorEmpenhado")),
-                        _parse_br_number(emenda.get("valorLiquidado")),
-                        _parse_br_number(emenda.get("valorPago")),
-                        _parse_br_number(emenda.get("valorRestoInscrito")),
-                        _parse_br_number(emenda.get("valorRestoCancelado")),
-                        _parse_br_number(emenda.get("valorRestoPago"))
-                    ))
+                    with savepoint(cursor, "sp_emenda"):
+                        cursor.execute("""
+                            INSERT INTO portal.emendas
+                                (codigo_emenda, ano, tipo_emenda, autor, nome_autor,
+                                 numero_emenda, localidade_gasto, funcao, subfuncao,
+                                 valor_empenhado, valor_liquidado, valor_pago,
+                                 valor_resto_inscrito, valor_resto_cancelado, valor_resto_pago)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT DO NOTHING
+                        """, (
+                            emenda.get("codigoEmenda"),
+                            emenda.get("ano"),
+                            emenda.get("tipoEmenda"),
+                            emenda.get("nomeAutor", ""),
+                            emenda.get("nomeAutor", ""),
+                            emenda.get("numeroEmenda"),
+                            emenda.get("localidadeDoGasto"),
+                            emenda.get("funcao"),
+                            emenda.get("subfuncao"),
+                            _parse_br_number(emenda.get("valorEmpenhado")),
+                            _parse_br_number(emenda.get("valorLiquidado")),
+                            _parse_br_number(emenda.get("valorPago")),
+                            _parse_br_number(emenda.get("valorRestoInscrito")),
+                            _parse_br_number(emenda.get("valorRestoCancelado")),
+                            _parse_br_number(emenda.get("valorRestoPago"))
+                        ))
                     if cursor.rowcount > 0:
                         inseridos_arquivo += 1
-                    cursor.execute("RELEASE SAVEPOINT sp_emenda")
                 except Exception as e:
                     logging.error(f"Erro ao inserir emenda {emenda.get('codigoEmenda')}: {e}")
-                    cursor.execute("ROLLBACK TO SAVEPOINT sp_emenda")
                     continue
             else:
                 conn.commit()
