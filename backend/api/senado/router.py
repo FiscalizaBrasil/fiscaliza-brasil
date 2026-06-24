@@ -6,7 +6,7 @@ _log = logging.getLogger(__name__)
 
 # Garanta que este import está correto para sua estrutura
 import database.db as db
-from database.utils import get_maior_legislatura_senado, get_legislatura_atual, periodo_legislatura, get_foto_url_senado
+from database.utils import get_maior_legislatura_senado, get_legislatura_atual, periodo_legislatura, get_foto_url_senado, legislatura_anos
 from database.cache import ttl_cache
 
 router = APIRouter(
@@ -14,10 +14,6 @@ router = APIRouter(
     tags=["Senado"]
 )
 
-
-def _periodo_legislatura(legislatura: int):
-    inicio = 2023 - (57 - legislatura) * 4
-    return inicio, inicio + 3
 
 @router.get("/legislaturas", summary="Lista todas as legislaturas disponíveis na base")
 @ttl_cache(maxsize=1, ttl=3600, cache_name="senado_legislaturas")
@@ -204,8 +200,7 @@ def get_estatisticas_senado(legislatura: int):
             """
             params_gastos: list[object] = []
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 query_gastos += """
                     INNER JOIN (
                         SELECT DISTINCT codigo_parlamentar
@@ -317,8 +312,7 @@ WHERE d.cod_senador IN (%s, %s)
             """
             params_stat = [id1, id2]
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 query_despesas += """
                     AND d.cod_senador IN (
                         SELECT DISTINCT codigo_parlamentar
@@ -488,7 +482,7 @@ WHERE codigo = %s;"""
             """
             params_emendas = [senador_codigo]
             if legislatura:
-                start_year, end_year = _periodo_legislatura(legislatura)
+                start_year, end_year = legislatura_anos(legislatura)
                 query_emendas += """
                     AND CAST(e.ano AS INTEGER) BETWEEN %s AND %s
                     AND EXISTS (
@@ -587,8 +581,7 @@ def get_despesas_senador(legislatura: int, senador_codigo: int, pagina: int = 1)
                 WHERE d.cod_senador = %s"""
             params_count = [senador_codigo]
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 query_count += " AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
                 params_count.extend([start_year, end_year])
             
@@ -609,8 +602,7 @@ def get_despesas_senador(legislatura: int, senador_codigo: int, pagina: int = 1)
             """
             params_rec = [senador_codigo]
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 query_recente += " AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
                 params_rec.extend([start_year, end_year])
                 
@@ -629,8 +621,7 @@ def get_despesas_senador(legislatura: int, senador_codigo: int, pagina: int = 1)
             """
             params_cat = [senador_codigo]
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 query_categorias += " AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
                 params_cat.extend([start_year, end_year])
             
@@ -682,8 +673,7 @@ def get_evolucao_despesas(legislatura: int):
 
         with conn.cursor() as cursor:
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 where_leg = " AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
                 join_mandato = """
                     INNER JOIN (
@@ -739,8 +729,7 @@ def get_despesas_estatisticas(legislatura: int):
             where_leg = ""
             join_mandato = ""
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 where_leg = " AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
                 join_mandato = """
                     INNER JOIN (
@@ -967,7 +956,7 @@ def get_materia_listar(
                 filtros.append("m.ano = %s")
                 params.append(ano)
             if legislatura:
-                start_year, end_year = _periodo_legislatura(legislatura)
+                start_year, end_year = legislatura_anos(legislatura)
                 filtros.append("m.ano BETWEEN %s AND %s")
                 params.extend([start_year, end_year])
             if ementa:
@@ -1116,7 +1105,7 @@ def get_lista_emendas(
             params_base = []
 
             if legislatura:
-                start_year, end_year = _periodo_legislatura(legislatura)
+                start_year, end_year = legislatura_anos(legislatura)
                 filtros_base.append("CAST(e.ano AS INTEGER) BETWEEN %s AND %s")
                 params_base.extend([start_year, end_year])
                 filtros_base.append("""
@@ -1239,7 +1228,7 @@ def get_resumo_emendas(legislatura: int):
         with conn.cursor() as cursor:
             params_base = []
             if legislatura:
-                start_year, end_year = _periodo_legislatura(legislatura)
+                start_year, end_year = legislatura_anos(legislatura)
                 where_base = """
                     CAST(e.ano AS INTEGER) BETWEEN %s AND %s
                     AND EXISTS (
@@ -1391,8 +1380,7 @@ def get_votacao_materia(legislatura: int, codigo_materia: int):
             """
             params = [codigo_materia]
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 query += " AND m.ano BETWEEN %s AND %s"
                 params.extend([start_year, end_year])
 
@@ -1437,7 +1425,7 @@ def get_emendas_lista_senador(legislatura: int, senador_codigo: int, pagina: int
             params_base = [senador_codigo]
 
             if legislatura:
-                start_year, end_year = _periodo_legislatura(legislatura)
+                start_year, end_year = legislatura_anos(legislatura)
                 filtros_base.append("CAST(e.ano AS INTEGER) BETWEEN %s AND %s")
                 params_base.extend([start_year, end_year])
                 filtros_base.append("""
@@ -1545,8 +1533,7 @@ def get_estatisticas_empresas(legislatura: int):
         with conn.cursor() as cursor:
             # Determinar o período da legislatura
             if legislatura and legislatura > 0:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 filtro_ano = "AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
                 params_ano = [start_year, end_year]
             else:
@@ -1682,8 +1669,7 @@ def get_resumo_principal_senado(legislatura: int = 0):
             if usar_legislatura:
                 # Para filtrar por legislatura, é necessário garantir que o senador
                 # estava em exercício no período da despesa (baseado no ano)
-                start_year = 2023 - (57 - usar_legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(usar_legislatura)
                 query_gastos = """
                     SELECT COALESCE(SUM(d.valor_reembolsado), 0)
                     FROM senado.despesa_ceaps d

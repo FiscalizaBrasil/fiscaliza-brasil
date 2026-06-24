@@ -3,21 +3,35 @@ Funções utilitárias para consultas ao banco de dados.
 """
 
 import os
-import math
 import logging
 from datetime import date
-from functools import lru_cache
+
+
+# ---------------------------------------------------------------------------
+# Funções de conversão legislatura ↔ ano
+# Fórmula: L = floor((Y - 1987) / 4) + 48  ↔  ano_início = 4 × L + 1795
+# ---------------------------------------------------------------------------
+
+def ano_para_legislatura(ano: int) -> int:
+    """Converte um ano na legislatura correspondente."""
+    return (ano - 1987) // 4 + 48
+
+
+def legislatura_anos(legislatura: int) -> tuple[int, int]:
+    """Retorna (ano_inicio, ano_fim) de uma legislatura."""
+    inicio = 4 * legislatura + 1795
+    return inicio, inicio + 3
+
+
+def legislatura_anos_lista(legislatura: int) -> list[int]:
+    """Retorna a lista de anos cobertos por uma legislatura."""
+    inicio, fim = legislatura_anos(legislatura)
+    return list(range(inicio, fim + 1))
 
 
 def get_legislatura_atual() -> int:
-    """
-    Retorna a legislatura atual com base no ano corrente.
-    Fórmula: FLOOR((ano - 1987) / 4) + 48
-    
-    Cada legislatura dura 4 anos. A 48ª legislatura começou em 1987.
-    """
-    ano_atual = date.today().year
-    return math.floor((ano_atual - 1987) / 4) + 48
+    """Retorna a legislatura atual com base no ano corrente."""
+    return ano_para_legislatura(date.today().year)
 
 
 def get_maior_legislatura_camara(conn):
@@ -80,7 +94,7 @@ def get_maior_legislatura_senado(conn):
             if row and row[0] and row[1]:
                 min_ano, max_ano = int(row[0]), int(row[1])
                 # Calcula a maior legislatura que cobre o intervalo
-                maior_leg = 57 - (2023 - max_ano) // 4
+                maior_leg = ano_para_legislatura(int(max_ano))
                 if maior_leg > 0:
                     return min(maior_leg, get_legislatura_atual())
                 return None
@@ -95,33 +109,25 @@ def get_maior_legislatura_senado(conn):
 def get_ano_referencia_legislatura(conn, casa="camara"):
     """
     Retorna o ano de início da maior legislatura disponível no banco.
-    Utiliza o fato de que a legislatura X começou em (2023 - (57 - X) * 4),
-    mas substitui 57 pela maior legislatura real do banco.
-    
     Retorna (maior_legislatura, ano_inicio) ou (None, None) se vazio.
     """
     if casa == "camara":
         maior_leg = get_maior_legislatura_camara(conn)
     else:
         maior_leg = get_maior_legislatura_senado(conn)
-    
+
     if maior_leg is None:
         return None, None
-    
-    # Cada legislatura dura 4 anos. A legislatura 57 começou em 2023.
-    ano_inicio = 2023 - (57 - maior_leg) * 4
-    return maior_leg, ano_inicio
+
+    return maior_leg, legislatura_anos(maior_leg)[0]
 
 
 def periodo_legislatura(legislatura: int, maior_legislatura: int = 57):
     """
     Calcula o período (ano_inicio, ano_fim) de uma legislatura.
-    Utiliza a maior legislatura conhecida como referência.
-    
-    A legislatura 57 começou em 2023. Cada legislatura dura 4 anos.
+    Mantido para compatibilidade retroativa.
     """
-    ano_inicio = 2023 - (57 - legislatura) * 4
-    return ano_inicio, ano_inicio + 3
+    return legislatura_anos(legislatura)
 
 
 # ============================================================

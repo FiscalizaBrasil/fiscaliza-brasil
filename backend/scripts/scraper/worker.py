@@ -24,6 +24,7 @@ from .portal.emendas import fetch_emendas_parlamentar
 
 try:
     from database import db
+    from database.utils import legislatura_anos_lista
     from scripts.import_data import (
         import_despesas_camara,
         import_despesas_senado,
@@ -40,6 +41,7 @@ try:
 except ImportError:
     logging.exception("Falha ao importar módulos de dados:")
     db = None
+    legislatura_anos_lista = None
     import_despesas_camara = None
     import_despesas_senado = None
     import_emendas = None
@@ -218,9 +220,8 @@ def _move_matching_files(directory, prefix, failed_subpath_dir):
 # ===================================================================
 
 def _anos_legislatura(id_legislatura):
-    """Calcula os anos cobertos por uma legislatura."""
-    ano_inicio = 2023 - (57 - id_legislatura) * 4
-    return list(range(ano_inicio, ano_inicio + 4))
+    """Calcula os anos cobertos por uma legislatura. Delegado a database.utils."""
+    return legislatura_anos_lista(id_legislatura)
 
 
 def _get_deputados_pendentes(data_dir=None):

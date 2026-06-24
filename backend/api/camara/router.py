@@ -7,7 +7,7 @@ _log = logging.getLogger(__name__)
 
 # Garanta que este import está correto para sua estrutura
 import database.db as db
-from database.utils import get_maior_legislatura_camara, get_legislatura_atual, periodo_legislatura, get_foto_url_camara
+from database.utils import get_maior_legislatura_camara, get_legislatura_atual, periodo_legislatura, get_foto_url_camara, legislatura_anos
 from database.cache import ttl_cache
 
 router = APIRouter(
@@ -216,8 +216,7 @@ def get_resumo_emendas(legislatura: int):
             
             if legislatura:
                 leg_join = ""
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 leg_where = "WHERE CAST(e.ano AS INTEGER) BETWEEN %s AND %s"
                 leg_params = [start_year, end_year]
             else:
@@ -380,8 +379,7 @@ def get_lista_proposicoes(
                 filtros.append("p.ano = %s")
                 params.append(ano)
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 filtros.append("p.ano BETWEEN %s AND %s")
                 params.extend([start_year, end_year])
             if ementa:
@@ -520,8 +518,7 @@ def get_votos_proposicao(legislatura: int, proposicao_id: int):
             """
             params = [proposicao_id]
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 query += " AND EXTRACT(YEAR FROM v.data) BETWEEN %s AND %s"
                 params.extend([start_year, end_year])
             
@@ -891,8 +888,7 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
             """
             params_emendas = [deputado_id]
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 query_emendas_resumo += " AND CAST(e.ano AS INTEGER) BETWEEN %s AND %s"
                 params_emendas.extend([start_year, end_year])
 
@@ -1035,8 +1031,7 @@ def get_emendas_deputado(legislatura: int, deputado_id: int, pagina: int = Query
             """
             params_base = [deputado_id]
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 filtros += " AND CAST(e.ano AS INTEGER) BETWEEN %s AND %s"
                 params_base.extend([start_year, end_year])
 
@@ -1097,8 +1092,7 @@ def get_evolucao_despesas(legislatura: int):
 
         with conn.cursor() as cursor:
             if legislatura:
-                start_year = 2023 - (57 - legislatura) * 4
-                end_year = start_year + 3
+                start_year, end_year = legislatura_anos(legislatura)
                 cursor.execute("""
                     SELECT d.ano, d.mes, SUM(d.valor_documento) as valor
                     FROM camara.deputados_despesas d

@@ -19,6 +19,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 try:
     from database import db
+    from database.utils import legislatura_anos
     from scripts.scraper.cache import is_cache_valid, save_json
     from scripts.scraper.rate_limiter import senado_legis_limiter
     from scripts.scraper.verification import mark_verified
@@ -301,14 +302,13 @@ def import_deputados_camara(conn) -> bool:
             email = dep.get("email", "")
 
             # 1. Insere/ignora legislatura
-            # Fórmula geral: cada legislatura dura 4 anos.
-            # A 49ª legislatura (1ª após a Constituição de 1988) iniciou em 1991.
-            # ano_inicio = (id_legislatura - 49) * 4 + 1991
+            # Fórmula: ano_início = 4 × L + 1795
+            ano_inicio = legislatura_anos(id_legislatura)[0]
             cursor.execute("""
                 INSERT INTO camara.legislaturas (id, data_inicio)
                 VALUES (%s, %s)
                 ON CONFLICT (id) DO NOTHING
-            """, (id_legislatura, f"{(id_legislatura - 49) * 4 + 1991}-02-01"))
+            """, (id_legislatura, f"{ano_inicio}-02-01"))
 
             # 2. Insere/ignora deputado
             cursor.execute("""
@@ -624,14 +624,13 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                             id_legislatura = dep_info.get("idLegislatura")
                             
                             if id_legislatura:
-                                # Fórmula geral: cada legislatura dura 4 anos.
-                                # A 49ª legislatura (1ª após a Constituição de 1988) iniciou em 1991.
-                                # ano_inicio = (id_legislatura - 49) * 4 + 1991
+                                # Fórmula: ano_início = 4 × L + 1795
+                                ano_inicio = legislatura_anos(id_legislatura)[0]
                                 cursor.execute("""
                                     INSERT INTO camara.legislaturas (id, data_inicio)
                                     VALUES (%s, %s)
                                     ON CONFLICT (id) DO NOTHING
-                                """, (id_legislatura, f"{(id_legislatura - 49) * 4 + 1991}-02-01"))
+                                """, (id_legislatura, f"{ano_inicio}-02-01"))
                             
                             cursor.execute("""
                                 INSERT INTO camara.deputados (id, nome_civil, email)
@@ -643,7 +642,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                                 # Busca situação e condição eleitoral na API (com cache)
                                 situacao, condicao_eleitoral = _buscar_situacao_deputado(dep_id)
                                 mandato_id = f"{dep_id}_{id_legislatura}"
-                                ano_inicio = (id_legislatura - 49) * 4 + 1991
+                                ano_inicio = legislatura_anos(id_legislatura)[0]
                                 cursor.execute("""
                                     INSERT INTO camara.deputados_mandatos
                                         (id, deputado_id, legislatura_id, nome_eleitoral,

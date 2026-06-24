@@ -7,14 +7,14 @@ from ..config import DATA_DIR, ANOS_PADRAO
 from ..cache import is_cache_valid
 from ..fetcher import fetch_paginated
 from ..verification import is_verified
+from database.utils import legislatura_anos_lista
 
 _log = logging.getLogger("CAMARA")
 
 
 def _anos_legislatura(id_legislatura):
-    """Calcula os anos cobertos por uma legislatura."""
-    ano_inicio = 2023 - (57 - id_legislatura) * 4
-    return list(range(ano_inicio, ano_inicio + 4))
+    """Calcula os anos cobertos por uma legislatura. Delegado a database.utils."""
+    return legislatura_anos_lista(id_legislatura)
 
 
 def fetch_despesas_deputado(deputado_id, anos=None, id_legislatura=None, data_dir=None):
