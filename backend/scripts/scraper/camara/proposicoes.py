@@ -27,12 +27,11 @@ def fetch_proposicoes_ano(ano, data_dir=None):
             "pagina": pagina,
         }
 
-    def filepath_template(pagina):
-        return os.path.join(data_dir, f"{ano}_pagina{pagina}.json")
+    filepath = os.path.join(data_dir, f"{ano}.json")
 
     return fetch_paginated(
         url=url,
-        filepath_template=filepath_template,
+        filepath=filepath,
         params_fn=params_fn,
         timeout=30,
         log_label="proposições ano=%s" % ano,
@@ -57,12 +56,11 @@ def fetch_proposicoes_deputado(deputado_id, data_dir=None):
             "pagina": pagina,
         }
 
-    def filepath_template(pagina):
-        return os.path.join(data_dir, f"{deputado_id}_pagina{pagina}.json")
+    filepath = os.path.join(data_dir, f"{deputado_id}.json")
 
     return fetch_paginated(
         url=url,
-        filepath_template=filepath_template,
+        filepath=filepath,
         params_fn=params_fn,
         timeout=30,
         log_label="proposições do deputado %s" % deputado_id,

@@ -39,6 +39,6 @@ scraping_status = {
     "senado_completo": False,
     "proposicoes_pendentes": 0,
     "proposicoes_completa": False,
-    "deputados_perfil_pendente": True,
-    "senadores_perfil_pendente": True,
+    "votacoes_pendentes": 0,
+    "votacoes_completa": False,
 }

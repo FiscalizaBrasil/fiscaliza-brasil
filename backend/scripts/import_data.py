@@ -725,7 +725,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                                 continue
                             
                             try:
-                                ano_arquivo = int(fname.split('_')[0])
+                                ano_arquivo = int(fname.replace('.json', '').split('_')[0])
                             except (ValueError, IndexError):
                                 ano_arquivo = None
                             
@@ -1513,7 +1513,7 @@ def import_proposicoes_camara(conn, ano: int = None) -> Optional[bool]:
     
     # Determina quais arquivos processar
     if ano is not None:
-        arquivos = [f for f in os.listdir(proposicoes_dir) if f.startswith(f"{ano}_pagina") and f.endswith(".json")]
+        arquivos = [f for f in os.listdir(proposicoes_dir) if f == f"{ano}.json"]
     else:
         arquivos = sorted([f for f in os.listdir(proposicoes_dir) if f.endswith(".json")])
     
@@ -1584,7 +1584,7 @@ def import_proposicoes_camara(conn, ano: int = None) -> Optional[bool]:
 def import_proposicoes_deputado(conn, deputado_id: int) -> Optional[bool]:
     """
     Lê os JSONs de proposições de um deputado específico em
-    backend/data/camara/proposicoes/deputados/{deputado_id}_pagina{p}.json
+     backend/data/camara/proposicoes/deputados/{deputado_id}.json
     e insere/atualiza os dados na tabela camara.proposicoes.
     
     A estrutura do JSON é a mesma da listagem geral (via API com idDeputadoAutor).
@@ -1596,7 +1596,7 @@ def import_proposicoes_deputado(conn, deputado_id: int) -> Optional[bool]:
     
     arquivos = sorted([
         f for f in os.listdir(proposicoes_dir)
-        if f.startswith(f"{deputado_id}_pagina") and f.endswith(".json")
+        if f == f"{deputado_id}.json"
     ])
     
     if not arquivos:
@@ -1662,6 +1662,174 @@ def import_proposicoes_deputado(conn, deputado_id: int) -> Optional[bool]:
     
     if total_inseridos > 0:
         logging.info(f"Importação de proposições do deputado {deputado_id} concluída. {total_inseridos} registros inseridos/atualizados.")
+    return True if total_inseridos > 0 else None
+
+
+def import_votacoes_camara(conn, ano: int = None) -> Optional[bool]:
+    """
+    Lê os JSONs de votações em backend/data/camara/votacoes/
+    e insere/atualiza os dados nas tabelas camara.votacoes e
+    camara.votacoes_proposicoes.
+
+    Se ano for fornecido, processa APENAS aquele ano (importação incremental).
+    Caso contrário, processa todos os anos (importação completa).
+
+    Estrutura esperada do JSON da API (listagem):
+    {
+        "dados": [
+            {
+                "id": "2196871-83",
+                "uri": "...",
+                "data": "2026-06-18",
+                "dataHoraRegistro": "2026-06-18T11:37:20",
+                "siglaOrgao": "CDE",
+                "uriOrgao": "...",
+                "uriEvento": null,
+                "proposicaoObjeto": null,
+                "uriProposicaoObjeto": null,
+                "descricao": "...",
+                "aprovacao": 1
+            }
+        ]
+    }
+
+    Extrai id_orgao e id_evento das URIs quando disponíveis.
+    Insere também a relação proposição nas votações_proposicoes
+    quando proposicaoObjeto não for nulo.
+    """
+    votacoes_dir = os.path.join(DATA_DIR, "camara", "votacoes")
+    if not os.path.isdir(votacoes_dir):
+        logging.warning(f"Diretório de votações não encontrado: {votacoes_dir}")
+        return None
+
+    # Determina quais arquivos processar
+    if ano is not None:
+        merged = os.path.join(votacoes_dir, f"{ano}.json")
+        if os.path.isfile(merged):
+            arquivos = [f"{ano}.json"]
+        else:
+            arquivos = sorted([
+                f for f in os.listdir(votacoes_dir)
+                if f.startswith(f"{ano}_Q") and f.endswith(".json")
+            ])
+    else:
+        all_files = sorted([
+            f for f in os.listdir(votacoes_dir)
+            if f.endswith(".json")
+        ])
+        merged_years = {
+            f.replace(".json", "")
+            for f in all_files if "_Q" not in f
+        }
+        arquivos = [f for f in all_files if "_Q" not in f]
+        for f in all_files:
+            if "_Q" in f:
+                ano_str = f.split("_")[0]
+                if ano_str not in merged_years:
+                    arquivos.append(f)
+
+    if not arquivos:
+        logging.warning(f"Nenhum arquivo de votações encontrado em {votacoes_dir}")
+        return None
+
+    logging.info(f"Importando votações de {len(arquivos)} arquivo(s)...")
+
+    total_inseridos = 0
+
+    with conn.cursor() as cursor:
+        for fname in arquivos:
+            filepath = os.path.join(votacoes_dir, fname)
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            dados = data.get("dados", [])
+            if not dados:
+                continue
+
+            inseridos_arquivo = 0
+
+            for vot in dados:
+                cursor.execute("SAVEPOINT sp_vot")
+                try:
+                    id_orgao = None
+                    uri_orgao = vot.get("uriOrgao")
+                    if uri_orgao:
+                        try:
+                            id_orgao = int(uri_orgao.rstrip("/").split("/")[-1])
+                        except (ValueError, IndexError):
+                            pass
+
+                    id_evento = None
+                    uri_evento = vot.get("uriEvento")
+                    if uri_evento:
+                        try:
+                            id_evento = int(uri_evento.rstrip("/").split("/")[-1])
+                        except (ValueError, IndexError):
+                            pass
+
+                    cursor.execute("""
+                        INSERT INTO camara.votacoes
+                            (id, uri, data, data_hora_registro, sigla_orgao,
+                             uri_orgao, id_orgao, uri_evento, id_evento,
+                             descricao, aprovacao)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE SET
+                            uri = EXCLUDED.uri,
+                            data = EXCLUDED.data,
+                            data_hora_registro = EXCLUDED.data_hora_registro,
+                            sigla_orgao = EXCLUDED.sigla_orgao,
+                            uri_orgao = EXCLUDED.uri_orgao,
+                            id_orgao = EXCLUDED.id_orgao,
+                            uri_evento = EXCLUDED.uri_evento,
+                            id_evento = EXCLUDED.id_evento,
+                            descricao = EXCLUDED.descricao,
+                            aprovacao = EXCLUDED.aprovacao
+                    """, (
+                        vot.get("id"),
+                        vot.get("uri"),
+                        vot.get("data"),
+                        vot.get("dataHoraRegistro"),
+                        vot.get("siglaOrgao"),
+                        vot.get("uriOrgao"),
+                        id_orgao,
+                        vot.get("uriEvento"),
+                        id_evento,
+                        vot.get("descricao"),
+                        vot.get("aprovacao"),
+                    ))
+
+                    proposicao_id = vot.get("proposicaoObjeto")
+                    if proposicao_id is not None:
+                        try:
+                            cursor.execute("""
+                                INSERT INTO camara.votacoes_proposicoes
+                                    (votacao_id, proposicao_id)
+                                VALUES (%s, %s)
+                                ON CONFLICT (votacao_id, proposicao_id) DO NOTHING
+                            """, (
+                                vot.get("id"),
+                                proposicao_id,
+                            ))
+                        except Exception:
+                            pass
+
+                    inseridos_arquivo += 1
+                    cursor.execute("RELEASE SAVEPOINT sp_vot")
+                except Exception as e:
+                    logging.error(f"Erro ao inserir votação {vot.get('id')}: {e}")
+                    cursor.execute("ROLLBACK TO SAVEPOINT sp_vot")
+                    continue
+            else:
+                conn.commit()
+                total_inseridos += inseridos_arquivo
+                if inseridos_arquivo > 0:
+                    logging.info(f"Arquivo {fname}: {inseridos_arquivo} votações importadas.")
+                continue
+
+            logging.warning(f"Arquivo {fname}: importação interrompida devido a erro.")
+
+    if total_inseridos > 0:
+        logging.info(f"Importação de votações concluída. {total_inseridos} registros inseridos/atualizados.")
     return True if total_inseridos > 0 else None
 
 
@@ -1940,8 +2108,8 @@ def import_emendas(conn, arquivo: str = None) -> Optional[bool]:
             if not fname.endswith(".json"):
                 continue
 
-            # Extrai o prefixo do nome do arquivo (ex: "ERIKA_HILTON" de "ERIKA_HILTON_pagina1.json")
-            prefixo_arquivo = fname.rsplit("_pagina", 1)[0]
+            # Extrai o prefixo do nome do arquivo (ex: "ERIKA_HILTON_2024" de "ERIKA_HILTON_2024.json")
+            prefixo_arquivo = fname.replace(".json", "")
             if prefixo_arquivo in _emendas_importadas:
                 continue  # Já importado nesta sessão
 
@@ -2074,6 +2242,11 @@ def import_all_data(conn) -> bool:
             imported = True
     except Exception as e:
         logging.error(f"Erro em import_proposicoes_camara: {e}")
+    try:
+        if import_votacoes_camara(conn):
+            imported = True
+    except Exception as e:
+        logging.error(f"Erro em import_votacoes_camara: {e}")
     try:
         if import_autores_proposicoes(conn):
             imported = True

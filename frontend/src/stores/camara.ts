@@ -121,6 +121,7 @@ export interface ProjetosLegislativosFilters {
   siglaTipo: string
   ano: string
   deputado: string
+  votadas: boolean
 }
 
 export interface VotoDeputado {
@@ -155,6 +156,7 @@ export const useCamaraStore = defineStore("camara", () => {
     siglaTipo: "",
     ano: "",
     deputado: "",
+    votadas: false,
   })
 
   const legislatura = ref(0)
@@ -464,6 +466,9 @@ export const useCamaraStore = defineStore("camara", () => {
       if (projetosLegislativosFilters.value.deputado) {
         params.append("deputado", projetosLegislativosFilters.value.deputado)
       }
+      if (projetosLegislativosFilters.value.votadas) {
+        params.append("votadas", "true")
+      }
 
       const response = await fetch(`${apiUrl}/api/camara/${legislatura.value}/proposicoes?${params.toString()}`)
       if (!response.ok) throw new Error("Falha ao buscar projetos legislativos")
@@ -588,13 +593,18 @@ export const useCamaraStore = defineStore("camara", () => {
     }
   }
 
-  const setProjetosLegislativosFilter = (key: keyof ProjetosLegislativosFilters, value: string) => {
+  const setProjetosLegislativosFilter = <K extends keyof ProjetosLegislativosFilters>(key: K, value: ProjetosLegislativosFilters[K]) => {
     projetosLegislativosFilters.value[key] = value
     fetchProjetosLegislativos(1)
   }
 
   const resetProjetosLegislativosFilters = () => {
-    projetosLegislativosFilters.value = { search: "", siglaTipo: "", ano: "", deputado: "" }
+    projetosLegislativosFilters.value = { search: "", siglaTipo: "", ano: "", deputado: "", votadas: false }
+    fetchProjetosLegislativos(1)
+  }
+
+  const toggleProjetosLegislativosVotadas = () => {
+    projetosLegislativosFilters.value.votadas = !projetosLegislativosFilters.value.votadas
     fetchProjetosLegislativos(1)
   }
 
@@ -716,6 +726,7 @@ export const useCamaraStore = defineStore("camara", () => {
     projetosLegislativosPorTipo,
     setProjetosLegislativosFilter,
     resetProjetosLegislativosFilters,
+    toggleProjetosLegislativosVotadas,
     currentVotos,
     loadingVotos,
     selectedProjetoLegislativoId,

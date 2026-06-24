@@ -12,7 +12,7 @@ from ..rate_limiter import portal_limiter
 _log = logging.getLogger("PORTAL")
 
 
-def fetch_emendas_parlamentar(nome_autor, ano=None, pagina=1, data_dir=None):
+def fetch_emendas_parlamentar(nome_autor, ano=None, pagina=None, data_dir=None):
     if data_dir is None:
         data_dir = os.path.join(DATA_DIR, "portal", "emendas")
 
@@ -22,9 +22,9 @@ def fetch_emendas_parlamentar(nome_autor, ano=None, pagina=1, data_dir=None):
     nome_sanitizado = nome_sem_acento.replace(" ", "_").replace("/", "_").upper()
 
     if ano is not None:
-        filepath = os.path.join(data_dir, f"{nome_sanitizado}_{ano}_pagina{pagina}.json")
+        filepath = os.path.join(data_dir, f"{nome_sanitizado}_{ano}.json")
     else:
-        filepath = os.path.join(data_dir, f"{nome_sanitizado}_pagina{pagina}.json")
+        filepath = os.path.join(data_dir, f"{nome_sanitizado}.json")
 
     if is_cache_valid(filepath):
         _log.info("Cache válido: %s", filepath)
@@ -37,43 +37,93 @@ def fetch_emendas_parlamentar(nome_autor, ano=None, pagina=1, data_dir=None):
         return {"emendas": []}
 
     url = "https://api.portaldatransparencia.gov.br/api-de-dados/emendas"
-    params = {"nomeAutor": nome_sem_acento.upper(), "pagina": pagina}
-    if ano is not None:
-        params["ano"] = ano
     headers = {"accept": "*/*", "chave-api-dados": api_key}
 
-    _log.info("Buscando emendas de %s (ano=%s, página %s)...",
-              nome_autor.upper(), ano or "todos", pagina)
+    if pagina is not None:
+        params = {"nomeAutor": nome_sem_acento.upper(), "pagina": pagina}
+        if ano is not None:
+            params["ano"] = ano
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        portal_limiter.acquire()
-        try:
-            response = requests.get(url, params=params, headers=headers, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+        _log.info("Buscando emendas de %s (ano=%s, página %s)...",
+                  nome_autor.upper(), ano or "todos", pagina)
 
-            if not isinstance(data, list) or len(data) == 0:
+        max_retries = 3
+        for attempt in range(max_retries):
+            portal_limiter.acquire()
+            try:
+                response = requests.get(url, params=params, headers=headers, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                if not isinstance(data, list) or len(data) == 0:
+                    return {"emendas": []}
+                return {"emendas": data}
+            except requests.exceptions.HTTPError as e:
+                status_code = response.status_code if response is not None else 0
+                if status_code == 403 and attempt < max_retries - 1:
+                    wait = 2 ** attempt * 5
+                    _log.warning("403 para %s (ano=%s, página %s), tentativa %d/%d, aguardando %ds...",
+                                 nome_autor, ano or "todos", pagina, attempt + 1, max_retries, wait)
+                    time.sleep(wait)
+                    continue
+                _log.error("Erro ao buscar emendas de %s (página %s): %s", nome_autor, pagina, e)
+                return {"emendas": [], "_error_403": status_code == 403}
+            except Exception as e:
+                _log.error("Erro ao buscar emendas de %s (página %s): %s", nome_autor, pagina, e)
                 return {"emendas": []}
+        return {"emendas": [], "_error_403": True}
 
-            result = {"emendas": data}
-            save_json(result, filepath)
-            return result
-        except requests.exceptions.HTTPError as e:
-            status_code = response.status_code if response is not None else 0
-            if status_code == 403 and attempt < max_retries - 1:
-                wait = 2 ** attempt * 5
-                _log.warning("403 para %s (ano=%s), tentativa %d/%d, aguardando %ds...",
-                             nome_autor, ano or "todos", attempt + 1, max_retries, wait)
-                time.sleep(wait)
-                continue
-            _log.error("Erro ao buscar emendas de %s: %s", nome_autor, e)
-            return {"emendas": [], "_error_403": status_code == 403}
-        except Exception as e:
-            _log.error("Erro ao buscar emendas de %s: %s", nome_autor, e)
-            return {"emendas": []}
+    _log.info("Buscando emendas de %s (ano=%s)...", nome_autor.upper(), ano or "todos")
+    all_emendas = []
+    pagina = 1
+    consecutive_403 = 0
 
-    return {"emendas": [], "_error_403": True}
+    while True:
+        params = {"nomeAutor": nome_sem_acento.upper(), "pagina": pagina}
+        if ano is not None:
+            params["ano"] = ano
+
+        max_retries = 3
+        page_data = None
+        for attempt in range(max_retries):
+            portal_limiter.acquire()
+            try:
+                response = requests.get(url, params=params, headers=headers, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                if isinstance(data, list) and len(data) > 0:
+                    page_data = data
+                break
+            except requests.exceptions.HTTPError as e:
+                status_code = response.status_code if response is not None else 0
+                if status_code == 403 and attempt < max_retries - 1:
+                    wait = 2 ** attempt * 5
+                    _log.warning("403 para %s (ano=%s, página %s), tentativa %d/%d, aguardando %ds...",
+                                 nome_autor, ano or "todos", pagina, attempt + 1, max_retries, wait)
+                    time.sleep(wait)
+                    continue
+                _log.error("Erro ao buscar emendas de %s (página %s): %s", nome_autor, pagina, e)
+                if status_code == 403:
+                    consecutive_403 += 1
+                break
+            except Exception as e:
+                _log.error("Erro ao buscar emendas de %s (página %s): %s", nome_autor, pagina, e)
+                break
+
+        if page_data is None:
+            if consecutive_403 >= 3:
+                return {"emendas": [], "_error_403": True}
+            break
+
+        consecutive_403 = 0
+        all_emendas.extend(page_data)
+        pagina += 1
+
+        if pagina > 50:
+            break
+
+    result = {"emendas": all_emendas}
+    save_json(result, filepath)
+    return result
 
 
 def fetch_emendas_todas(data_dir=None):
@@ -115,18 +165,10 @@ def fetch_emendas_todas(data_dir=None):
         nome_sanitizado = nome_sem_acento.replace(" ", "_").replace("/", "_")
 
         for ano in range(2015, ano_atual + 1):
-            pagina1_path = os.path.join(data_dir, f"{nome_sanitizado}_{ano}_pagina1.json")
+            merged_path = os.path.join(data_dir, f"{nome_sanitizado}_{ano}.json")
 
-            if os.path.isfile(pagina1_path) and is_cache_valid(pagina1_path):
+            if os.path.isfile(merged_path) and is_cache_valid(merged_path):
                 continue
 
             _log.info("Buscando dados de %s ano=%s", nome, ano)
-            pagina = 1
-            while True:
-                result = fetch_emendas_parlamentar(nome, ano=ano, pagina=pagina, data_dir=data_dir)
-                emendas = result.get("emendas", [])
-                if not emendas:
-                    break
-                pagina += 1
-                if pagina > 50:
-                    break
+            fetch_emendas_parlamentar(nome, ano=ano, data_dir=data_dir)

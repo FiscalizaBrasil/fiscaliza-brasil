@@ -936,6 +936,7 @@ def get_materia_listar(
     ano: int = Query(None),
     ementa: str = Query(None),
     senador: str = Query(None),
+    votadas: bool = Query(False),
     limite: int = Query(15, ge=1, le=200),
     pagina: int = Query(1, ge=1)
 ):
@@ -975,6 +976,8 @@ def get_materia_listar(
             if senador:
                 filtros.append("(sv.nome_parlamentar ILIKE %s OR sv.nome_completo ILIKE %s)")
                 params.extend([f"%{senador}%", f"%{senador}%"])
+            if votadas:
+                filtros.append("EXISTS (SELECT 1 FROM senado.votacao_parlamentar vp WHERE vp.codigo_materia = m.codigo)")
 
             where_clause = " WHERE " + " AND ".join(filtros)
 

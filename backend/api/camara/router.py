@@ -348,6 +348,7 @@ def get_lista_proposicoes(
     ano: int = Query(None), 
     ementa: str = Query(None), 
     deputado: str = Query(None),
+    votadas: bool = Query(False),
     limite: int = Query(15, ge=1, le=200),
     pagina: int = Query(1, ge=1)
 ):
@@ -389,6 +390,8 @@ def get_lista_proposicoes(
             if deputado:
                 filtros.append("d.nome_civil ILIKE %s")
                 params.append(f"%{deputado}%")
+            if votadas:
+                filtros.append("EXISTS (SELECT 1 FROM camara.votacoes_proposicoes vp WHERE vp.proposicao_id = p.id)")
 
             where_clause = " WHERE " + " AND ".join(filtros)
 

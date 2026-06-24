@@ -11,6 +11,11 @@ from .camara.proposicoes import (
     fetch_autores_proposicao,
     fetch_proposicoes_todas,
 )
+from .camara.votacoes import (
+    fetch_votacoes_ano,
+    fetch_votos_votacao,
+    fetch_votacoes_todas,
+)
 from .camara.historico import fetch_historico_deputado, fetch_historico_todos_deputados
 from .camara.detalhes import fetch_detalhes_deputado, fetch_detalhes_todos_deputados
 
@@ -30,6 +35,7 @@ from .lifecycle import (
     stop_background_scraper,
     start_background_fotos,
     start_background_import,
+    ensure_base_data_downloaded,
     main,
 )
 

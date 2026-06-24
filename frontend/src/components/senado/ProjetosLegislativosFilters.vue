@@ -48,7 +48,25 @@
       </select>
     </div>
 
-
+    <!-- Toggle matérias votadas -->
+    <div class="flex items-center gap-2 pt-2 border-t border-border/50">
+      <button
+        @click="store.toggleProjetosLegislativosVotadas()"
+        class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        :class="{ 'text-primary font-medium': store.projetosLegislativosFilters.votadas }"
+      >
+        <div
+          class="w-9 h-5 rounded-full transition-colors relative"
+          :class="store.projetosLegislativosFilters.votadas ? 'bg-primary' : 'bg-muted-foreground/30'"
+        >
+          <div
+            class="w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-transform"
+            :class="store.projetosLegislativosFilters.votadas ? 'translate-x-[18px]' : 'translate-x-[2px]'"
+          />
+        </div>
+        <span>Apenas matérias com votação</span>
+      </button>
+    </div>
 
     <div v-if="hasActiveFilters" class="flex items-center gap-2">
       <span class="text-sm text-muted-foreground">Filtros ativos:</span>
@@ -88,7 +106,7 @@ const onSenadorInput = (event: Event) => {
 }
 
 const hasActiveFilters = computed(() => {
-  return store.projetosLegislativosFilters.search || store.projetosLegislativosFilters.siglaTipo || store.projetosLegislativosFilters.ano || store.projetosLegislativosFilters.senador
+  return store.projetosLegislativosFilters.search || store.projetosLegislativosFilters.siglaTipo || store.projetosLegislativosFilters.ano || store.projetosLegislativosFilters.senador || store.projetosLegislativosFilters.votadas
 })
 
 const anosDisponiveis = computed(() => {

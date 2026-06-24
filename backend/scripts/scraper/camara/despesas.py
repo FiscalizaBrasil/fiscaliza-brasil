@@ -48,15 +48,13 @@ def fetch_despesas_deputado(deputado_id, anos=None, id_legislatura=None, data_di
         if id_legislatura is not None:
             leg_dir = os.path.join(dep_dir, str(id_legislatura))
             os.makedirs(leg_dir, exist_ok=True)
-            def filepath_template(pagina):
-                return os.path.join(leg_dir, f"{ano}_pagina{pagina}.json")
+            filepath = os.path.join(leg_dir, f"{ano}.json")
         else:
-            def filepath_template(pagina):
-                return os.path.join(dep_dir, f"{ano}_pagina{pagina}.json")
+            filepath = os.path.join(dep_dir, f"{ano}.json")
 
         ano_resultados = fetch_paginated(
             url=url,
-            filepath_template=filepath_template,
+            filepath=filepath,
             params_fn=params_fn,
             timeout=30,
             headers=headers,
@@ -116,7 +114,7 @@ def fetch_despesas_todas_camara(data_dir=None):
             ano_tem_dados = False
             if os.path.isdir(leg_dir):
                 for fname in os.listdir(leg_dir):
-                    if fname.startswith(f"{ano}_pagina") and fname.endswith(".json"):
+                    if fname == f"{ano}.json":
                         ano_tem_dados = True
                         break
             if not ano_tem_dados:

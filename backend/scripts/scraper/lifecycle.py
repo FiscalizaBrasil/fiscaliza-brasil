@@ -2,7 +2,7 @@ import threading
 import logging
 
 from .config import DATA_DIR
-from .camara.deputados import fetch_deputados_camara, download_fotos_deputados
+from .camara.deputados import fetch_deputados_todas_legislaturas, download_fotos_deputados
 from .senado.senadores import fetch_senadores_senado, download_fotos_senadores
 
 _log = logging.getLogger("WORKER")
@@ -103,7 +103,6 @@ _log_senado_foto = logging.getLogger("SENADO")
 def _background_fotos_camara():
     try:
         _log_camara_foto.info("Baixando fotos dos deputados...")
-        fetch_deputados_camara()
         download_fotos_deputados()
         _log_camara_foto.info("Fotos dos deputados concluído.")
     except Exception as e:
@@ -113,11 +112,30 @@ def _background_fotos_camara():
 def _background_fotos_senado():
     try:
         _log_senado_foto.info("Baixando fotos dos senadores...")
-        fetch_senadores_senado()
         download_fotos_senadores()
         _log_senado_foto.info("Fotos dos senadores concluído.")
     except Exception as e:
         _log_senado_foto.error("Erro ao baixar fotos: %s", e)
+
+
+def ensure_base_data_downloaded():
+    """Baixa os arquivos base (deputados.json e senadores.json) de forma
+    bloqueante, garantindo que existam antes da importação e scrapers.
+
+    Ambas as funcoes sao cache-aware — se os arquivos ja existirem e
+    estiverem validos, pulam o download.
+    """
+    _log.info("Baixando dados base (deputados e senadores)...")
+    try:
+        fetch_deputados_todas_legislaturas()
+        _log.info("deputados.json pronto.")
+    except Exception as e:
+        _log.error("Falha ao baixar deputados.json: %s", e)
+    try:
+        fetch_senadores_senado()
+        _log.info("senadores.json pronto.")
+    except Exception as e:
+        _log.error("Falha ao baixar senadores.json: %s", e)
 
 
 def start_background_fotos():

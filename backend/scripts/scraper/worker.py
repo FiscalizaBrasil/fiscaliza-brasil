@@ -9,16 +9,15 @@ import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import DATA_DIR, ANOS_PADRAO, SENADO_ULTIMO_ANO_CACHE_SECONDS, SENADO_ANO_INICIO, scraping_status, _status_lock
-from .cache import is_cache_valid, remover_acentos
+from .cache import is_cache_valid, load_json_if_valid, remover_acentos
 from .verification import is_verified, clean_expired
 
-from .camara.deputados import fetch_deputados_todas_legislaturas
 from .camara.despesas import fetch_despesas_deputado
 from .camara.proposicoes import fetch_proposicoes_ano, fetch_proposicoes_deputado
+from .camara.votacoes import fetch_votacoes_ano
 from .camara.historico import fetch_historico_deputado
 from .camara.detalhes import fetch_detalhes_deputado
 
-from .senado.senadores import fetch_senadores_senado
 from .senado.despesas import fetch_despesas_senado_ano
 
 from .portal.emendas import fetch_emendas_parlamentar
@@ -31,12 +30,11 @@ try:
         import_emendas,
         import_proposicoes_camara,
         import_autores_proposicoes,
-        import_deputados_camara,
-        import_senadores_senado,
         import_historico_deputados,
         import_detalhes_deputados,
         import_processos_senado,
         import_proposicoes_deputado,
+        import_votacoes_camara,
         _buscar_e_inserir_senador_api,
     )
 except ImportError:
@@ -47,12 +45,11 @@ except ImportError:
     import_emendas = None
     import_proposicoes_camara = None
     import_autores_proposicoes = None
-    import_deputados_camara = None
-    import_senadores_senado = None
     import_historico_deputados = None
     import_detalhes_deputados = None
     import_processos_senado = None
     import_proposicoes_deputado = None
+    import_votacoes_camara = None
     _buscar_e_inserir_senador_api = None
 
 # ---------------------------------------------------------------------------
@@ -283,7 +280,7 @@ def _get_deputados_pendentes(data_dir=None):
             ano_tem_dados = False
             if os.path.isdir(leg_dir):
                 for fname in os.listdir(leg_dir):
-                    if fname.startswith(f"{ano}_pagina") and fname.endswith(".json"):
+                    if fname == f"{ano}.json":
                         ano_tem_dados = True
                         break
             if not ano_tem_dados:
@@ -353,11 +350,42 @@ def _get_anos_proposicoes_pendentes(data_dir=None):
         ano_tem_dados = False
         if os.path.isdir(data_dir):
             for fname in os.listdir(data_dir):
-                if fname.startswith(f"{ano}_pagina") and fname.endswith(".json"):
+                if fname == f"{ano}.json":
                     ano_tem_dados = True
                     break
         if not ano_tem_dados:
             pendentes.append(ano)
+    return pendentes
+
+
+def _get_anos_votacoes_pendentes(data_dir=None):
+    if data_dir is None:
+        data_dir = os.path.join(DATA_DIR, "camara", "votacoes")
+
+    ano_atual = datetime.datetime.now().year
+    anos = list(ANOS_PADRAO)
+    pendentes = []
+
+    if not os.path.isdir(data_dir):
+        return anos
+
+    for ano in anos:
+        if ano < ano_atual:
+            merged = os.path.join(data_dir, f"{ano}.json")
+            if not os.path.isfile(merged) or not is_cache_valid(merged):
+                pendentes.append(ano)
+        else:
+            # Ano corrente: verifica 3 quadrimestres, todos sem _incomplete
+            ok = True
+            for i in (1, 2, 3):
+                q_path = os.path.join(data_dir, f"{ano}_Q{i}.json")
+                cached = load_json_if_valid(q_path)
+                if cached is None or cached.get("_incomplete"):
+                    ok = False
+                    break
+            if not ok:
+                pendentes.append(ano)
+
     return pendentes
 
 
@@ -400,14 +428,8 @@ def _get_parlamentares_sem_emendas(data_dir=None):
         if is_verified("portal_emendas", nome_sanitizado.upper()):
             continue
 
-        # Cache válido no formato novo: {nome}_{ano}_pagina1.json
-        pagina1_path = os.path.join(data_dir, f"{nome_sanitizado}_{ano_atual}_pagina1.json")
-        if os.path.isfile(pagina1_path) and is_cache_valid(pagina1_path):
-            continue
-
-        # Fallback: formato antigo {nome}_pagina1.json
-        pagina1_path_old = os.path.join(data_dir, f"{nome_sanitizado}_pagina1.json")
-        if os.path.isfile(pagina1_path_old) and is_cache_valid(pagina1_path_old):
+        merged_path = os.path.join(data_dir, f"{nome_sanitizado}_{ano_atual}.json")
+        if os.path.isfile(merged_path) and is_cache_valid(merged_path):
             continue
 
         sem_emendas.append(nome)
@@ -464,7 +486,7 @@ def _get_deputados_sem_proposicoes(data_dir=None):
         tem_dados = False
         if os.path.isdir(data_dir):
             for fname in os.listdir(data_dir):
-                if fname.startswith(f"{dep_id}_pagina") and fname.endswith(".json"):
+                if fname == f"{dep_id}.json":
                     tem_dados = True
                     break
         if not tem_dados:
@@ -598,23 +620,8 @@ def _processar_ano_senado(ano):
 def _processar_emendas_parlamentar(nome):
     def _fetch():
         ano_atual = datetime.datetime.now().year
-        consecutive_403 = 0
         for ano in range(2015, ano_atual + 1):
-            pagina = 1
-            while True:
-                result = fetch_emendas_parlamentar(nome, ano=ano, pagina=pagina)
-                if not result.get("emendas", []):
-                    if result.get("_error_403"):
-                        consecutive_403 += 1
-                        if consecutive_403 >= 3:
-                            return
-                    else:
-                        consecutive_403 = 0
-                    break
-                consecutive_403 = 0
-                pagina += 1
-                if pagina > 50:
-                    break
+            fetch_emendas_parlamentar(nome, ano=ano)
 
     nome_sanitizado = _sanitize_nome(nome)
     return _processar_com_importacao({
@@ -654,12 +661,31 @@ def _processar_ano_proposicoes(ano):
         'source_name': 'camara',
         'move_matching': {
             'dir': os.path.join(DATA_DIR, "camara", "proposicoes"),
-            'prefix': f'{ano}_pagina',
+            'prefix': f'{ano}',
             'failed_subpath_dir': 'camara/proposicoes',
         },
         'success_msg': "Proposicoes de %s importadas.",
         'success_msg_args': (ano,),
         'error_prefix': "Erro em proposicoes de %s: %s",
+        'error_prefix_args': (ano,),
+    })
+
+
+def _processar_ano_votacoes(ano):
+    return _processar_com_importacao({
+        'logger': log_camara,
+        'log_msg': "Baixando votacoes de %s",
+        'log_msg_args': (ano,),
+        'fetch': lambda: fetch_votacoes_ano(ano),
+        'import_fn': import_votacoes_camara,
+        'import_kwargs': {'ano': ano},
+        'item_key': f'votacoes/{ano}',
+        'label': f'votacoes {ano}',
+        'failed_subpath': f'camara/votacoes/{ano}',
+        'source_name': 'camara',
+        'success_msg': "Votacoes de %s importadas.",
+        'success_msg_args': (ano,),
+        'error_prefix': "Erro em votacoes de %s: %s",
         'error_prefix_args': (ano,),
     })
 
@@ -718,7 +744,7 @@ def _processar_proposicoes_deputado(dep_id):
         'source_name': 'camara',
         'move_matching': {
             'dir': os.path.join(DATA_DIR, "camara", "proposicoes", "deputados"),
-            'prefix': f'{dep_id}_pagina',
+            'prefix': f'{dep_id}',
             'failed_subpath_dir': 'camara/proposicoes/deputados',
         },
         'success_msg': "Proposicoes do deputado %s importadas.",
@@ -726,40 +752,6 @@ def _processar_proposicoes_deputado(dep_id):
         'error_prefix': "Erro nas proposicoes do deputado %s: %s",
         'error_prefix_args': (dep_id,),
     })
-
-
-def _processar_perfil_deputados():
-    global scraping_status
-    if not scraping_status.get("deputados_perfil_pendente", False):
-        return
-
-    log_camara.info("Baixando perfil de deputados (legislaturas 55, 56, 57)...")
-    try:
-        fetch_deputados_todas_legislaturas()
-
-        import_ok = False
-        if import_deputados_camara is not None:
-            conn = db.get_db_connection()
-            if conn:
-                try:
-                    import_ok = import_deputados_camara(conn)
-                    if import_ok:
-                        log_camara.info("Perfil de deputados importado.")
-                finally:
-                    db.release_db_connection(conn)
-
-        if not import_ok:
-            log_camara.warning(
-                "Importação de perfil de deputados falhou ou nada a importar. "
-                "Arquivos mantidos para retry automático."
-            )
-            return
-
-        with _status_lock:
-            scraping_status["deputados_perfil_pendente"] = False
-        log_camara.info("Perfil de deputados concluído.")
-    except Exception as e:
-        log_camara.error("Erro no perfil de deputados: %s", e)
 
 
 def _garantir_senadores_despesas():
@@ -817,57 +809,6 @@ def _garantir_senadores_despesas():
         db.release_db_connection(conn)
 
 
-def _processar_perfil_senadores():
-    global scraping_status
-    if not scraping_status.get("senadores_perfil_pendente", False):
-        return
-
-    log_senado.info("Baixando perfil de senadores...")
-    try:
-        fetch_senadores_senado()
-
-        import_ok = False
-        conn_failed = False
-        if import_senadores_senado is not None:
-            conn = db.get_db_connection() if db is not None else None
-            if conn:
-                try:
-                    import_ok = import_senadores_senado(conn)
-                    if import_ok:
-                        log_senado.info("Perfil de senadores importado.")
-                finally:
-                    db.release_db_connection(conn)
-            else:
-                conn_failed = True
-
-        if not import_ok:
-            if conn_failed:
-                log_senado.warning(
-                    "Falha ao conectar ao banco para importar perfil de senadores. "
-                    "Arquivos mantidos para retry automático."
-                )
-            elif import_senadores_senado is None:
-                log_senado.warning(
-                    "Módulo de importação não disponível. "
-                    "Arquivos mantidos para retry automático."
-                )
-            else:
-                log_senado.warning(
-                    "Importação de perfil de senadores: arquivo não encontrado ou vazio. "
-                    "Arquivos mantidos para retry automático."
-                )
-            return
-
-        # Garantir integridade: parlamentares e mandatos para senadores históricos
-        _garantir_senadores_despesas()
-
-        with _status_lock:
-            scraping_status["senadores_perfil_pendente"] = False
-        log_senado.info("Perfil de senadores concluído.")
-    except Exception as e:
-        log_senado.error("Erro no perfil de senadores: %s", e)
-
-
 # ===================================================================
 # Background workers – one per source
 # ===================================================================
@@ -878,6 +819,7 @@ CAMARA_LIMIT_PROPOSICOES = 3
 CAMARA_LIMIT_HISTORICO = 5
 CAMARA_LIMIT_DETALHES = 5
 CAMARA_LIMIT_PROPOSICOES_DEP = 5
+CAMARA_LIMIT_VOTACOES = 3
 CAMARA_CYCLE_SLEEP = 5  # seconds between cycles
 CAMARA_IDLE_SLEEP = 30  # seconds when everything is complete
 
@@ -942,7 +884,7 @@ def _background_worker_generico(logger, name, stop_flag_attr, perfil_fn,
                 for future in as_completed(futures):
                     fn, item = futures[future]
                     try:
-                        result = future.result(timeout=120)
+                        result = future.result(timeout=600)
                         logger.info("Tarefa concluida: %s", result)
                     except Exception as e:
                         logger.error(
@@ -960,6 +902,7 @@ def _background_worker_generico(logger, name, stop_flag_attr, perfil_fn,
 def _build_camara_tasks():
     despesas = _get_deputados_pendentes()
     proposicoes = _get_anos_proposicoes_pendentes()
+    votacoes = _get_anos_votacoes_pendentes()
     historicos = _get_deputados_sem_historico()
     detalhes = _get_deputados_sem_detalhes()
     proposicoes_dep = _get_deputados_sem_proposicoes()
@@ -967,6 +910,7 @@ def _build_camara_tasks():
     complete = (
         len(despesas) == 0
         and len(proposicoes) == 0
+        and len(votacoes) == 0
         and len(historicos) == 0
         and len(detalhes) == 0
         and len(proposicoes_dep) == 0
@@ -977,12 +921,15 @@ def _build_camara_tasks():
         scraping_status["camara_completa"] = complete
         scraping_status["proposicoes_pendentes"] = len(proposicoes)
         scraping_status["proposicoes_completa"] = len(proposicoes) == 0
+        scraping_status["votacoes_pendentes"] = len(votacoes)
+        scraping_status["votacoes_completa"] = len(votacoes) == 0
 
     if complete:
         return [], True
 
     random.shuffle(despesas)
     random.shuffle(proposicoes)
+    random.shuffle(votacoes)
     random.shuffle(historicos)
     random.shuffle(detalhes)
     random.shuffle(proposicoes_dep)
@@ -992,6 +939,8 @@ def _build_camara_tasks():
         tasks.append((_processar_deputado, dep))
     for ano in proposicoes[:CAMARA_LIMIT_PROPOSICOES]:
         tasks.append((_processar_ano_proposicoes, ano))
+    for ano in votacoes[:CAMARA_LIMIT_VOTACOES]:
+        tasks.append((_processar_ano_votacoes, ano))
     for dep_id in historicos[:CAMARA_LIMIT_HISTORICO]:
         tasks.append((_processar_historico_deputado, dep_id))
     for dep_id in detalhes[:CAMARA_LIMIT_DETALHES]:
@@ -1001,13 +950,14 @@ def _build_camara_tasks():
 
     n_desp = min(len(despesas), CAMARA_LIMIT_DESPESAS)
     n_anos = min(len(proposicoes), CAMARA_LIMIT_PROPOSICOES)
+    n_vot = min(len(votacoes), CAMARA_LIMIT_VOTACOES)
     n_hist = min(len(historicos), CAMARA_LIMIT_HISTORICO)
     n_det = min(len(detalhes), CAMARA_LIMIT_DETALHES)
     n_prop = min(len(proposicoes_dep), CAMARA_LIMIT_PROPOSICOES_DEP)
     log_camara.info(
-        "Ciclo: Despesas=%d Proposicoes=%d Historico=%d Detalhes=%d "
+        "Ciclo: Despesas=%d Proposicoes=%d Votacoes=%d Historico=%d Detalhes=%d "
         "ProposDep=%d (total=%d)",
-        n_desp, n_anos, n_hist, n_det, n_prop, len(tasks),
+        n_desp, n_anos, n_vot, n_hist, n_det, n_prop, len(tasks),
     )
 
     return tasks, complete
@@ -1018,7 +968,7 @@ def _background_worker_camara():
         logger=log_camara,
         name="Camara",
         stop_flag_attr="_stop_camara",
-        perfil_fn=_processar_perfil_deputados,
+        perfil_fn=None,
         build_tasks_fn=_build_camara_tasks,
         cycle_sleep=CAMARA_CYCLE_SLEEP,
         idle_sleep=CAMARA_IDLE_SLEEP,
@@ -1055,7 +1005,7 @@ def _background_worker_senado():
         logger=log_senado,
         name="Senado",
         stop_flag_attr="_stop_senado",
-        perfil_fn=_processar_perfil_senadores,
+        perfil_fn=None,
         build_tasks_fn=_build_senado_tasks,
         cycle_sleep=SENADO_CYCLE_SLEEP,
         idle_sleep=SENADO_IDLE_SLEEP,
@@ -1084,12 +1034,6 @@ def _build_portal_tasks():
     return [(_processar_emendas_parlamentar, nome) for nome in batch], complete
 
 
-def _portal_precondition():
-    dep_path = os.path.join(DATA_DIR, "camara", "deputados.json")
-    sen_path = os.path.join(DATA_DIR, "senado", "senadores.json")
-    return os.path.isfile(dep_path) and os.path.isfile(sen_path)
-
-
 def _background_worker_portal():
     _background_worker_generico(
         logger=log_portal,
@@ -1100,5 +1044,4 @@ def _background_worker_portal():
         cycle_sleep=PORTAL_CYCLE_SLEEP,
         idle_sleep=PORTAL_IDLE_SLEEP,
         max_workers=3,
-        wait_precondition=_portal_precondition,
     )

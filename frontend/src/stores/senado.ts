@@ -99,6 +99,7 @@ export interface ProjetosLegislativosFilters {
     siglaTipo: string
     ano: string
     senador: string
+    votadas: boolean
 }
 
 export interface Filters {
@@ -180,6 +181,7 @@ export const useSenadoStore = defineStore("senado", () => {
         siglaTipo: "",
         ano: "",
         senador: "",
+        votadas: false,
     })
     const projetosLegislativosList = ref<ProjetoLegislativoSenado[]>([])
     const totalProjetosLegislativos = ref(0)
@@ -476,6 +478,9 @@ export const useSenadoStore = defineStore("senado", () => {
             if (projetosLegislativosFilters.value.senador) {
                 params.append("senador", projetosLegislativosFilters.value.senador)
             }
+            if (projetosLegislativosFilters.value.votadas) {
+                params.append("votadas", "true")
+            }
 
             const response = await fetch(`${apiUrl}/api/senado/${legislatura.value}/materia/listar?${params.toString()}`)
             if (!response.ok) throw new Error("Falha ao buscar projetos legislativos")
@@ -567,13 +572,18 @@ export const useSenadoStore = defineStore("senado", () => {
 
     const projetosLegislativosPorTipo = computed(() => projetosLegislativosDistribuicao.value)
 
-    const setProjetosLegislativosFilter = (key: keyof ProjetosLegislativosFilters, value: string) => {
+    const setProjetosLegislativosFilter = <K extends keyof ProjetosLegislativosFilters>(key: K, value: ProjetosLegislativosFilters[K]) => {
         projetosLegislativosFilters.value[key] = value
         fetchProjetosLegislativos(1)
     }
 
     const resetProjetosLegislativosFilters = () => {
-        projetosLegislativosFilters.value = { search: "", siglaTipo: "", ano: "", senador: "" }
+        projetosLegislativosFilters.value = { search: "", siglaTipo: "", ano: "", senador: "", votadas: false }
+        fetchProjetosLegislativos(1)
+    }
+
+    const toggleProjetosLegislativosVotadas = () => {
+        projetosLegislativosFilters.value.votadas = !projetosLegislativosFilters.value.votadas
         fetchProjetosLegislativos(1)
     }
 
@@ -636,6 +646,7 @@ export const useSenadoStore = defineStore("senado", () => {
         loadingVotos,
         setProjetosLegislativosFilter,
         resetProjetosLegislativosFilters,
+        toggleProjetosLegislativosVotadas,
         apiUrl,
         legislaturasDisponiveis,
         fetchLegislaturasDisponiveis,
