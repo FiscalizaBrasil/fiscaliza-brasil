@@ -5,6 +5,30 @@ import logging
 
 _log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Fragmentos SQL reutilizáveis para mapear deputado_id → nome (lower)
+# ---------------------------------------------------------------------------
+
+_NOMES_DEPUTADOS = (
+    "SELECT id, lower(nome_civil) as nome FROM camara.deputados\n"
+    "UNION\n"
+    "SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos"
+)
+
+_NOMES_DEPUTADOS_COM_CIVIL = (
+    "SELECT d.id, lower(d.nome_civil) as nome, d.nome_civil\n"
+    "FROM camara.deputados d\n"
+    "UNION\n"
+    "SELECT m.deputado_id as id, lower(m.nome_eleitoral) as nome, m.nome_eleitoral as nome_civil\n"
+    "FROM camara.deputados_mandatos m"
+)
+
+_IDS_DEPUTADOS = (
+    "SELECT id FROM camara.deputados\n"
+    "UNION\n"
+    "SELECT deputado_id as id FROM camara.deputados_mandatos"
+)
+
 # Garanta que este import está correto para sua estrutura
 import database.db as db
 from database.utils import get_maior_legislatura_camara, get_legislatura_atual, periodo_legislatura, get_foto_url_camara, legislatura_anos
@@ -80,13 +104,9 @@ def get_lista_emendas(
         
         with conn.cursor() as cursor:
             # 1. Total para paginação
-            query_count = """
+            query_count = f"""
                 WITH parlamentares_nomes AS (
-                    SELECT d.id, lower(d.nome_civil) as nome 
-                    FROM camara.deputados d
-                    UNION
-                    SELECT m.deputado_id as id, lower(m.nome_eleitoral) as nome 
-                    FROM camara.deputados_mandatos m
+{_NOMES_DEPUTADOS}
                 )
                 SELECT COUNT(*)
                 FROM portal.emendas e
@@ -122,13 +142,9 @@ def get_lista_emendas(
             total_paginas = (total_items + itens_por_pagina - 1) // itens_por_pagina
 
             # 2. Dados paginados
-            query = """
+            query = f"""
                 WITH parlamentares_nomes AS (
-                    SELECT d.id, lower(d.nome_civil) as nome, d.nome_civil 
-                    FROM camara.deputados d
-                    UNION
-                    SELECT m.deputado_id as id, lower(m.nome_eleitoral) as nome, m.nome_eleitoral as nome_civil 
-                    FROM camara.deputados_mandatos m
+{_NOMES_DEPUTADOS_COM_CIVIL}
                 )
                 SELECT 
                     p.nome_civil as deputado,
@@ -227,17 +243,13 @@ def get_resumo_emendas(legislatura: int):
             # 1. Totais Gerais
             query_totais = f"""
                 WITH parlamentares_nomes AS (
-                    SELECT id FROM camara.deputados
-                    UNION
-                    SELECT deputado_id as id FROM camara.deputados_mandatos
+{_IDS_DEPUTADOS}
                 ),
                 deputados_emendas AS (
                     SELECT e.id, e.valor_pago, e.localidade_gasto, e.funcao, p.id as deputado_id
                     FROM portal.emendas e
                     JOIN (
-                        SELECT id, lower(nome_civil) as nome FROM camara.deputados
-                        UNION
-                        SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
+{_NOMES_DEPUTADOS}
                     ) p ON lower(e.autor) = p.nome
                     {leg_join}
                     {leg_where}
@@ -259,9 +271,7 @@ def get_resumo_emendas(legislatura: int):
                     SELECT e.valor_pago, e.funcao, p.id as deputado_id
                     FROM portal.emendas e
                     JOIN (
-                        SELECT id, lower(nome_civil) as nome FROM camara.deputados
-                        UNION
-                        SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
+{_NOMES_DEPUTADOS}
                     ) p ON lower(e.autor) = p.nome
                     {leg_join}
                     {leg_where}
@@ -289,9 +299,7 @@ def get_resumo_emendas(legislatura: int):
                     SELECT e.valor_pago, p.id as deputado_id
                     FROM portal.emendas e
                     JOIN (
-                        SELECT id, lower(nome_civil) as nome FROM camara.deputados
-                        UNION
-                        SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
+{_NOMES_DEPUTADOS}
                     ) p ON lower(e.autor) = p.nome
                     {leg_join}
                     {leg_where}
@@ -875,11 +883,9 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
             }
 
             # 2. Buscar Resumo de Emendas (Total de emendas pago ao autor)
-            query_emendas_resumo = """
+            query_emendas_resumo = f"""
                 WITH parlamentares_nomes AS (
-                    SELECT id, lower(nome_civil) as nome FROM camara.deputados
-                    UNION
-                    SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
+{_NOMES_DEPUTADOS}
                 )
                 SELECT SUM(e.valor_pago) as total_emendas
                 FROM portal.emendas e
@@ -1020,12 +1026,10 @@ def get_emendas_deputado(legislatura: int, deputado_id: int, pagina: int = Query
             raise HTTPException(status_code=503, detail="Banco de dados indisponível")
         
         with conn.cursor() as cursor:
-            filtros = """
+            filtros = f"""
                 FROM portal.emendas e
                 JOIN (
-                    SELECT id, lower(nome_civil) as nome FROM camara.deputados
-                    UNION
-                    SELECT deputado_id as id, lower(nome_eleitoral) as nome FROM camara.deputados_mandatos
+{_NOMES_DEPUTADOS}
                 ) d ON lower(e.autor) = d.nome
                 WHERE d.id = %s
             """
