@@ -4,6 +4,7 @@ Router para dados do Portal da Transparência (emendas parlamentares).
 
 from fastapi import APIRouter, HTTPException, Query
 from database import db
+from database.db import db_cursor
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,12 +25,8 @@ def get_emendas(
     Retorna emendas parlamentares do Portal da Transparência.
     Suporta filtros por ano, autor, tipo, função e paginação.
     """
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             where_clauses = []
             params = []
 
@@ -84,9 +81,7 @@ def get_emendas(
     except Exception as e:
         logger.error(f"Erro ao buscar emendas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 
 @router.get("/emendas/resumo")
@@ -94,12 +89,8 @@ def get_emendas_resumo():
     """
     Retorna um resumo agregado das emendas: total por ano, total por tipo, etc.
     """
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             # Total por ano
             cursor.execute("""
                 SELECT ano, COUNT(*) as qtd, SUM(valor_empenhado) as total_empenhado,
@@ -142,6 +133,4 @@ def get_emendas_resumo():
     except Exception as e:
         logger.error(f"Erro ao buscar resumo de emendas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+

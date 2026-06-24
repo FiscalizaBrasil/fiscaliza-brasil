@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import psycopg2.pool
 import os
+from contextlib import contextmanager
 
 load_dotenv()
 
@@ -38,5 +39,26 @@ def release_db_connection(conn):
     except Exception:
         pass  # Se a conexão já estiver fechada, ignora
     db_pool.putconn(conn)
-    
+
+
+@contextmanager
+def db_connection():
+    """Context manager que obtém e libera uma conexão do pool automaticamente."""
+    conn = get_db_connection()
+    try:
+        yield conn
+    finally:
+        release_db_connection(conn)
+
+
+@contextmanager
+def db_cursor():
+    """Context manager que obtém conexão + cursor e libera tudo automaticamente."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            yield cursor
+    finally:
+        release_db_connection(conn)
+
       

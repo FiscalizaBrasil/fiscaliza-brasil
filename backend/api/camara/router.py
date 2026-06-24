@@ -31,6 +31,7 @@ _IDS_DEPUTADOS = (
 
 # Garanta que este import está correto para sua estrutura
 import database.db as db
+from database.db import db_cursor, db_connection
 from database.utils import get_maior_legislatura_camara, get_legislatura_atual, periodo_legislatura, get_foto_url_camara, legislatura_anos
 from database.cache import ttl_cache
 
@@ -42,13 +43,8 @@ router = APIRouter(
 
 @router.get("/legislaturas", summary="Lista todas as legislaturas disponíveis na base")
 def get_legislaturas_camara():
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             query = """
                 SELECT DISTINCT legislatura_id
                 FROM camara.deputados_mandatos
@@ -62,30 +58,22 @@ def get_legislaturas_camara():
     except Exception as e:
         _log.error(f"Erro ao buscar legislaturas ativas camara: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar legislaturas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/maior-legislatura", summary="Retorna a maior legislatura disponível na base")
 @ttl_cache(maxsize=1, ttl=3600, cache_name="camara_maior_legislatura")
 def get_maior_legislatura_camara_endpoint():
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
+        with db_connection() as conn:
+            maior_leg = get_maior_legislatura_camara(conn)
+            if maior_leg is None:
+                return {"maior_legislatura": None, "db_vazio": True}
         
-        maior_leg = get_maior_legislatura_camara(conn)
-        if maior_leg is None:
-            return {"maior_legislatura": None, "db_vazio": True}
-        
-        return {"maior_legislatura": maior_leg, "db_vazio": False}
+            return {"maior_legislatura": maior_leg, "db_vazio": False}
     except Exception as e:
         _log.error(f"Erro ao buscar maior legislatura: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar maior legislatura")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/emendas", summary="Busca uma lista de emendas parlamentares")
 def get_lista_emendas(
@@ -96,13 +84,8 @@ def get_lista_emendas(
 ):
     itens_por_pagina = 15
     offset = (pagina - 1) * itens_por_pagina
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             # 1. Total para paginação
             query_count = f"""
                 WITH parlamentares_nomes AS (
@@ -211,20 +194,13 @@ def get_lista_emendas(
     except Exception as e:
         _log.error(f"Erro ao buscar emendas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar emendas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/emendas/resumo", summary="Obtém resumo das emendas")
 @ttl_cache(maxsize=16, ttl=300, cache_name="camara_emendas_resumo")
 def get_resumo_emendas(legislatura: int):
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             # Base query components
             leg_join = ""
             leg_where = ""
@@ -344,9 +320,7 @@ def get_resumo_emendas(legislatura: int):
     except Exception as e:
         _log.error(f"Erro ao obter resumo de emendas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar resumo de emendas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/proposicoes", summary="Busca uma lista de projetos legislativos")
 def get_lista_proposicoes(
@@ -360,13 +334,8 @@ def get_lista_proposicoes(
     pagina: int = Query(1, ge=1)
 ):
     offset = (pagina - 1) * limite
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             from_clause = """
                 FROM camara.proposicoes p
             """
@@ -497,19 +466,12 @@ def get_lista_proposicoes(
     except Exception as e:
         _log.error(f"Erro ao buscar proposições: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar proposições")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/proposicoes/{proposicao_id}/votos", summary="Obtém o histórico de votos de um projeto legislativo")
 def get_votos_proposicao(legislatura: int, proposicao_id: int):
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             query = """
                 SELECT 
                     v.id AS votacao_id,
@@ -561,22 +523,15 @@ def get_votos_proposicao(legislatura: int, proposicao_id: int):
     except Exception as e:
         _log.error(f"Erro ao buscar votos: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar votos")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/lista", summary="Lista todos os deputados ativos")
 def get_todos_deputados(
     legislatura: int,
     incluir_suplentes: bool = Query(False, description="Se true, inclui suplentes na listagem")
 ):
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             query = """
                 SELECT DISTINCT ON (d.id)
                     d.id, 
@@ -615,9 +570,7 @@ def get_todos_deputados(
     except Exception as e:
         _log.error(f"Erro ao buscar lista de deputados: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar lista de deputados")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/estatisticas", summary="Obtém estatísticas gerais dos deputados")
 @ttl_cache(maxsize=16, ttl=300, cache_name="camara_estatisticas")
@@ -625,13 +578,8 @@ def get_estatisticas_gerais(
     legislatura: int,
     incluir_suplentes: bool = Query(False, description="Se true, inclui suplentes nas estatísticas")
 ):
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             # Filtro base: por padrão, apenas deputados titulares ou efetivados
             condicao_filter = "" if incluir_suplentes else " AND m.condicao_eleitoral IN ('Titular', 'Efetivado')"
             
@@ -697,9 +645,7 @@ def get_estatisticas_gerais(
     except Exception as e:
         _log.error(f"Erro ao buscar estatísticas gerais: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 
 
@@ -708,13 +654,8 @@ def get_comparativo_deputados(legislatura: int, id1: int, id2: int, ano: int = N
     if id1 == id2:
         raise HTTPException(status_code=400, detail="Escolha dois deputados diferentes para comparar.")
 
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             # 1. Buscar Perfis
             query_perfil = """
                 SELECT DISTINCT ON (d.id)
@@ -820,19 +761,12 @@ def get_comparativo_deputados(legislatura: int, id1: int, id2: int, ano: int = N
     except Exception as e:
         _log.error(f"Erro ao comparar deputados: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar comparação")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/{deputado_id}", summary="Obtém os detalhes do perfil e despesas do deputado pelo ID (via path)")
 def get_perfil_deputado(legislatura: int, deputado_id: int):
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             # 1. Buscar Perfil (Resiliente a legislatura inexistente)
             query_perfil = """
                 SELECT d.id, d.nome_civil, d.cpf, d.sexo, d.email, d.data_nascimento, 
@@ -923,21 +857,14 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
     except Exception as e:
         _log.error(f"Erro ao buscar perfil do deputado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar perfil")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/{deputado_id}/despesas", summary="Obtém o extrato de despesas de um deputado")
 def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Query(1, ge=1)):
     itens_per_page = 20
     offset = (pagina - 1) * itens_per_page
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             query_count = """
                 SELECT COUNT(*)
                 FROM camara.deputados_despesas AS desp
@@ -1011,21 +938,14 @@ def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Quer
     except Exception as e:
         _log.error(f"Erro ao buscar despesas do deputado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar despesas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/{deputado_id}/emendas", summary="Obtém a lista de emendas parlamentares de um deputado")
 def get_emendas_deputado(legislatura: int, deputado_id: int, pagina: int = Query(1, ge=1)):
     itens_per_page = 15
     offset = (pagina - 1) * itens_per_page
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             filtros = f"""
                 FROM portal.emendas e
                 JOIN (
@@ -1081,20 +1001,13 @@ def get_emendas_deputado(legislatura: int, deputado_id: int, pagina: int = Query
     except Exception as e:
         _log.error(f"Erro ao buscar emendas do deputado: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar emendas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/despesas/evolucao", summary="Obtém a evolução de gastos da Câmara (mensal ou anual)")
 @ttl_cache(maxsize=16, ttl=300, cache_name="camara_despesas_evolucao")
 def get_evolucao_despesas(legislatura: int):
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             if legislatura:
                 start_year, end_year = legislatura_anos(legislatura)
                 cursor.execute("""
@@ -1120,21 +1033,14 @@ def get_evolucao_despesas(legislatura: int):
     except Exception as e:
         _log.error(f"Erro ao buscar evolução de gastos: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar evolução de gastos")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 
 @router.get("/{legislatura}/despesas/estatisticas", summary="Obtém o panorama geral de gastos da Câmara")
 @ttl_cache(maxsize=16, ttl=300, cache_name="camara_despesas_estatisticas")
 def get_estatisticas_despesas(legislatura: int):
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             cursor.execute(
                 "SELECT total_gastos, total_empresas_contratadas FROM stats.camara_despesas_totais WHERE legislatura_id = %s",
                 (legislatura,)
@@ -1231,20 +1137,13 @@ def get_estatisticas_despesas(legislatura: int):
     except Exception as e:
         _log.error(f"Erro ao buscar estatísticas de despesas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas de despesas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 @router.get("/{legislatura}/despesas/panorama", summary="Obtém o panorama de gastos para a página de despesas da Câmara (leve)")
 @ttl_cache(maxsize=16, ttl=300, cache_name="camara_despesas_panorama")
 def get_panorama_despesas(legislatura: int):
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             cursor.execute(
                 "SELECT total_gastos, total_empresas_contratadas FROM stats.camara_despesas_totais WHERE legislatura_id = %s",
                 (legislatura,)
@@ -1306,9 +1205,7 @@ def get_panorama_despesas(legislatura: int):
     except Exception as e:
         _log.error(f"Erro ao buscar panorama de despesas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar panorama de despesas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 
 @router.get("/{legislatura}/empresas/estatisticas", summary="Obtém as estatísticas e ranking das empresas contratadas")
@@ -1317,13 +1214,8 @@ def get_estatisticas_empresas(legislatura: int, limit: int = 20):
     Retorna estatísticas de empresas fornecedoras dos deputados.
     Lê da materialized view stats.camara_empresas_ranking (atualizada em background).
     """
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             cursor.execute(
                 "SELECT COUNT(*), COALESCE(SUM(valor_total), 0), COALESCE(SUM(qtd_contratos), 0) FROM stats.camara_empresas_ranking WHERE legislatura_id = %s",
                 (legislatura,)
@@ -1368,9 +1260,7 @@ def get_estatisticas_empresas(legislatura: int, limit: int = 20):
     except Exception as e:
         _log.error(f"Erro ao buscar estatísticas de empresas: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar estatísticas de empresas")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 
 
@@ -1381,17 +1271,12 @@ def get_resumo_principal_camara(legislatura: int = 0):
     Ideal para dashboards e página inicial.
     Se legislatura não for informada (ou for 0), retorna dados de todas as legislaturas.
     """
-    conn = None
     try:
-        conn = db.get_db_connection()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Banco de dados indisponível")
-        
         # Se legislatura não foi informada (ou é 0), considera todas
         usar_legislatura = legislatura if (legislatura and legislatura > 0) else None
         
         if not usar_legislatura:
-            with conn.cursor() as cursor:
+            with db_cursor() as cursor:
                 cursor.execute("SELECT COUNT(*) FROM camara.deputados_mandatos")
                 if cursor.fetchone()[0] == 0:
                     return {
@@ -1400,7 +1285,7 @@ def get_resumo_principal_camara(legislatura: int = 0):
                         "db_vazio": True
                     }
         
-        with conn.cursor() as cursor:
+        with db_cursor() as cursor:
             # 1. Total de deputados (titulares e efetivados)
             query_total = "SELECT COUNT(DISTINCT deputado_id) FROM camara.deputados_mandatos WHERE condicao_eleitoral IN ('Titular', 'Efetivado')"
             params_total = []
@@ -1445,8 +1330,6 @@ def get_resumo_principal_camara(legislatura: int = 0):
     except Exception as e:
         _log.error(f"Erro no resumo principal da Câmara: {e}")
         raise HTTPException(status_code=500, detail="Erro ao processar resumo")
-    finally:
-        if conn:
-            db.release_db_connection(conn)
+
 
 
