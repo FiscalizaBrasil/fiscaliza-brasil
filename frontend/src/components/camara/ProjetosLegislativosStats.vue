@@ -50,10 +50,10 @@
             :key="tipo.tipo"
             class="flex items-center justify-between p-3 rounded-lg bg-background border border-border"
           >
-            <div class="flex items-center gap-3">
-              <BaseBadge variant="outline">{{ tipo.tipo }}</BaseBadge>
-              <span class="text-sm text-foreground">{{ getTipoNome(tipo.tipo) }}</span>
-            </div>
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-medium text-foreground">{{ tipo.tipo }}</span>
+            <span v-if="store.getTipoNome(tipo.tipo)" class="text-sm text-muted-foreground">({{ store.getTipoNome(tipo.tipo) }})</span>
+          </div>
             <span class="text-sm font-semibold text-foreground">{{ tipo.quantidade }}</span>
           </div>
         </div>
@@ -65,24 +65,7 @@
 <script setup lang="ts">
 import { FileText, BarChart3, TrendingUp } from 'lucide-vue-next'
 import BaseCard from '@/components/ui/BaseCard.vue'
-import BaseBadge from '@/components/ui/BaseBadge.vue'
 import { useCamaraStore } from '@/stores/camara'
 
 const store = useCamaraStore()
-
-const tiposNomes: Record<string, string> = {
-  PL: 'Projeto de Lei',
-  PLP: 'Projeto de Lei Complementar',
-  PEC: 'Proposta de Emenda à Constituição',
-  MPV: 'Medida Provisória',
-  PDL: 'Projeto de Decreto Legislativo',
-  PRC: 'Projeto de Resolução',
-  REQ: 'Requerimento',
-  INC: 'Indicação',
-  RIC: 'Requerimento de Informação',
-}
-
-const getTipoNome = (sigla: string) => {
-  return tiposNomes[sigla] || sigla
-}
 </script>

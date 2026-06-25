@@ -1786,20 +1786,28 @@ def import_votacoes_camara(conn, ano: int = None) -> Optional[bool]:
                             vot.get("aprovacao"),
                         ))
 
-                        proposicao_id = vot.get("proposicaoObjeto")
-                        if proposicao_id is not None:
+                        proposicao_id = None
+                        uri_prop = vot.get("uriProposicaoObjeto")
+                        if uri_prop:
+                            try:
+                                proposicao_id = int(uri_prop.rstrip("/").split("/")[-1])
+                            except (ValueError, IndexError):
+                                pass
+                        proposicao_objeto = vot.get("proposicaoObjeto")
+                        if proposicao_id is not None or proposicao_objeto is not None:
                             try:
                                 cursor.execute("""
                                     INSERT INTO camara.votacoes_proposicoes
-                                        (votacao_id, proposicao_id)
-                                    VALUES (%s, %s)
+                                        (votacao_id, proposicao_id, proposicao_objeto)
+                                    VALUES (%s, %s, %s)
                                     ON CONFLICT (votacao_id, proposicao_id) DO NOTHING
                                 """, (
                                     vot.get("id"),
                                     proposicao_id,
+                                    proposicao_objeto,
                                 ))
                             except Exception:
-                                pass
+                                cursor.execute("ROLLBACK TO SAVEPOINT sp_vot")
 
                     inseridos_arquivo += 1
                 except Exception as e:

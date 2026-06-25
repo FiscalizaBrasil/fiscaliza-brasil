@@ -34,6 +34,7 @@ import database.db as db
 from database.db import db_cursor, db_connection
 from database.utils import get_maior_legislatura_camara, get_legislatura_atual, periodo_legislatura, get_foto_url_camara, legislatura_anos
 from database.cache import ttl_cache
+from database.tipos_proposicao import get_tipos_camara
 
 router = APIRouter(
     prefix="/camara",
@@ -1332,4 +1333,7 @@ def get_resumo_principal_camara(legislatura: int = 0):
         raise HTTPException(status_code=500, detail="Erro ao processar resumo")
 
 
+@router.get("/tipos-proposicao", summary="Mapeamento sigla→nome dos tipos de proposição da Câmara")
+def get_tipos_proposicao_camara():
+    return get_tipos_camara()
 

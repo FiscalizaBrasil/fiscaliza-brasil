@@ -157,6 +157,7 @@ def ensure_schema(cursor):
         CREATE TABLE IF NOT EXISTS camara.votacoes_proposicoes (
             votacao_id VARCHAR(20) REFERENCES camara.votacoes(id),
             proposicao_id INTEGER REFERENCES camara.proposicoes(id),
+            proposicao_objeto VARCHAR(100),
             id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
             UNIQUE(votacao_id, proposicao_id)
         );

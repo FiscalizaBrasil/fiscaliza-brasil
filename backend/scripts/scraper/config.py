@@ -17,7 +17,8 @@ SENADO_ADM_API_BASE = "https://adm.senado.gov.br/adm-dadosabertos/api/v1"
 PORTAL_API_BASE = "https://api.portaldatransparencia.gov.br/api-de-dados"
 
 ANOS_PADRAO = list(range(2026, 1986, -1))
-LEGISLATURAS = [57, 56, 55]
+LEGISLATURAS = [57, 56, 55, 54, 53, 52, 51, 50, 49, 48]
+SENADO_LEGISLATURAS = [57, 56, 55, 54, 53, 52, 51, 50, 49, 48]
 
 # Senado despesas: ano mais antigo disponível na API
 SENADO_ANO_INICIO = 2008

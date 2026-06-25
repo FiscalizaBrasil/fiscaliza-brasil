@@ -18,6 +18,7 @@ from scripts.scraper import start_background_import, start_background_fotos, ens
 from scripts.stats_refresh import start_stats_refresh
 from database.cache import get_cache_stats, invalidate_cache
 from scripts.scraper.verification import invalidate as invalidate_verification
+from database.tipos_proposicao import fetch_tipos_camara, fetch_tipos_senado
 
 
 @asynccontextmanager
@@ -27,6 +28,9 @@ async def lifespan(app: FastAPI):
     invalidate_verification()
     logger.info("Baixando dados base (deputados e senadores)...")
     ensure_base_data_downloaded()
+    logger.info("Carregando mapeamento de tipos de proposicao...")
+    fetch_tipos_camara()
+    fetch_tipos_senado()
     logger.info("Iniciando downloads em background...")
     start_background_fotos()
     start_background_import()

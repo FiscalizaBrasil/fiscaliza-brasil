@@ -234,6 +234,26 @@ export const useCamaraStore = defineStore("camara", () => {
   const projetosLegislativosPage = ref(1)
   const hasMoreProjetosLegislativos = ref(true)
 
+  const tiposNomes = ref<Record<string, string>>({})
+  let tiposNomesFetched = false
+
+  const fetchTiposNomes = async () => {
+    if (tiposNomesFetched) return
+    tiposNomesFetched = true
+    try {
+      const response = await fetch(`${apiUrl}/api/camara/tipos-proposicao`)
+      if (response.ok) {
+        tiposNomes.value = await response.json()
+      }
+    } catch (e) {
+      console.error("Erro ao buscar tipos de proposicao:", e)
+    }
+  }
+
+  const getTipoNome = (sigla: string) => {
+    return tiposNomes.value[sigla] || ''
+  }
+
   // Scraping status state
   const scrapingStatus = ref<{
     em_andamento: boolean
@@ -446,6 +466,7 @@ export const useCamaraStore = defineStore("camara", () => {
 
 
   const fetchProjetosLegislativos = async (pagina = 1) => {
+    fetchTiposNomes()
     loadingProjetosLegislativos.value = true
     error.value = null
 
@@ -746,5 +767,8 @@ export const useCamaraStore = defineStore("camara", () => {
     pararPolling,
     incluirSuplentes,
     toggleIncluirSuplentes,
+    tiposNomes,
+    fetchTiposNomes,
+    getTipoNome,
   }
 })

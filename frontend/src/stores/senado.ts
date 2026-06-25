@@ -194,6 +194,26 @@ export const useSenadoStore = defineStore("senado", () => {
     const loadingVotos = ref(false)
     const loadingStats = ref(false)
 
+    const tiposNomes = ref<Record<string, string>>({})
+    let tiposNomesFetched = false
+
+    const fetchTiposNomes = async () => {
+        if (tiposNomesFetched) return
+        tiposNomesFetched = true
+        try {
+            const response = await fetch(`${apiUrl}/api/senado/tipos-materia`)
+            if (response.ok) {
+                tiposNomes.value = await response.json()
+            }
+        } catch (e) {
+            console.error("Erro ao buscar tipos de materia:", e)
+        }
+    }
+
+    const getTipoNome = (sigla: string) => {
+        return tiposNomes.value[sigla] || ''
+    }
+
     // Scraping status state
     const scrapingStatus = ref<{
         em_andamento: boolean
@@ -459,6 +479,7 @@ export const useSenadoStore = defineStore("senado", () => {
     }
 
     const fetchProjetosLegislativos = async (pagina = 1) => {
+        fetchTiposNomes()
         loadingProjetosLegislativos.value = true
         error.value = null
         try {
@@ -654,5 +675,7 @@ export const useSenadoStore = defineStore("senado", () => {
         fetchScrapingStatus,
         iniciarPollingSenador,
         pararPolling,
+        fetchTiposNomes,
+        getTipoNome,
     }
 })

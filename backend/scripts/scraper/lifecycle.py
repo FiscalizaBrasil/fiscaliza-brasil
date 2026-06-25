@@ -3,7 +3,7 @@ import logging
 
 from .config import DATA_DIR
 from .camara.deputados import fetch_deputados_todas_legislaturas, download_fotos_deputados
-from .senado.senadores import fetch_senadores_senado, download_fotos_senadores
+from .senado.senadores import fetch_senadores_todas_legislaturas, download_fotos_senadores
 
 _log = logging.getLogger("WORKER")
 
@@ -132,7 +132,7 @@ def ensure_base_data_downloaded():
     except Exception as e:
         _log.error("Falha ao baixar deputados.json: %s", e)
     try:
-        fetch_senadores_senado()
+        fetch_senadores_todas_legislaturas()
         _log.info("senadores.json pronto.")
     except Exception as e:
         _log.error("Falha ao baixar senadores.json: %s", e)
