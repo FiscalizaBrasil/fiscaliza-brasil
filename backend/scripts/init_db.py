@@ -93,24 +93,6 @@ def ensure_schema(cursor):
             UNIQUE(cod_documento, num_documento, data_documento, valor_documento, nome_fornecedor)
         );
     """)
-    
-    # Migra coluna cod_documento de BIGINT para VARCHAR(50) se necessário
-    cursor.execute("""
-        DO $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'camara'
-                  AND table_name = 'deputados_despesas'
-                  AND column_name = 'cod_documento'
-                  AND data_type = 'bigint'
-            ) THEN
-                ALTER TABLE camara.deputados_despesas 
-                ALTER COLUMN cod_documento TYPE VARCHAR(50);
-            END IF;
-        END
-        $$;
-    """)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS camara.proposicoes (
@@ -316,20 +298,6 @@ def ensure_schema(cursor):
             UNIQUE(ano, mes, cod_senador, documento, valor_reembolsado, fornecedor)
         );
     """);
-    
-    # Remove duplicatas existentes na senado.despesa_ceaps (mantém apenas uma por grupo)
-    cursor.execute("""
-        DELETE FROM senado.despesa_ceaps WHERE id IN (
-            SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (
-                    PARTITION BY ano, mes, cod_senador, COALESCE(documento,''), COALESCE(valor_reembolsado,0), COALESCE(fornecedor,'')
-                    ORDER BY id
-                ) as rn
-                FROM senado.despesa_ceaps
-            ) sub WHERE rn > 1
-        );
-    """);
-    logging.info(f"Duplicatas removidas de senado.despesa_ceaps.")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS senado.materia (
@@ -355,48 +323,7 @@ def ensure_schema(cursor):
             data_ultima_atualizacao TIMESTAMP
         );
     """);
-    
-    # Migração: adiciona colunas se não existirem (para banco existente)
-    cursor.execute("""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'id_processo') THEN
-                ALTER TABLE senado.materia ADD COLUMN id_processo INTEGER;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'situacao_atual') THEN
-                ALTER TABLE senado.materia ADD COLUMN situacao_atual TEXT;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'data_situacao_atual') THEN
-                ALTER TABLE senado.materia ADD COLUMN data_situacao_atual DATE;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'tramitando') THEN
-                ALTER TABLE senado.materia ADD COLUMN tramitando BOOLEAN DEFAULT FALSE;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'url_documento') THEN
-                ALTER TABLE senado.materia ADD COLUMN url_documento TEXT;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'objetivo') THEN
-                ALTER TABLE senado.materia ADD COLUMN objetivo VARCHAR(50);
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'tipo_conteudo') THEN
-                ALTER TABLE senado.materia ADD COLUMN tipo_conteudo TEXT;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'casa_identificadora') THEN
-                ALTER TABLE senado.materia ADD COLUMN casa_identificadora VARCHAR(10);
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'ente_identificador') THEN
-                ALTER TABLE senado.materia ADD COLUMN ente_identificador VARCHAR(10);
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'indexacao') THEN
-                ALTER TABLE senado.materia ADD COLUMN indexacao TEXT;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'materia' AND column_name = 'data_ultima_atualizacao') THEN
-                ALTER TABLE senado.materia ADD COLUMN data_ultima_atualizacao TIMESTAMP;
-            END IF;
-        END
-        $$;
-    """)
-    
+
     # Índices para a tabela materia
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_senado_materia_ano ON senado.materia(ano);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_senado_materia_sigla ON senado.materia(sigla);")
@@ -410,25 +337,11 @@ def ensure_schema(cursor):
             codigo_parlamentar INTEGER REFERENCES senado.parlamentar(codigo) ON DELETE CASCADE,
             codigo_materia INTEGER REFERENCES senado.materia(codigo) ON DELETE CASCADE,
             autor_principal BOOLEAN,
-            outros_autores BOOLEAN
+            outros_autores BOOLEAN,
+            autor_texto TEXT,
+            sigla_partido_autor VARCHAR(20),
+            uf_autor CHAR(2)
         );
-    """)
-
-    # Atualiza a tabela autoria para aceitar autor_texto (fallback quando não há código)
-    cursor.execute("""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'autoria' AND column_name = 'autor_texto') THEN
-                ALTER TABLE senado.autoria ADD COLUMN autor_texto TEXT;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'autoria' AND column_name = 'sigla_partido_autor') THEN
-                ALTER TABLE senado.autoria ADD COLUMN sigla_partido_autor VARCHAR(20);
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'senado' AND table_name = 'autoria' AND column_name = 'uf_autor') THEN
-                ALTER TABLE senado.autoria ADD COLUMN uf_autor CHAR(2);
-            END IF;
-        END
-        $$;
     """)
 
     cursor.execute("""
