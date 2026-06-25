@@ -66,13 +66,13 @@
                   <div class="h-32 w-32 mx-auto rounded-full border-4 border-primary/20 overflow-hidden bg-primary/10 flex items-center justify-center">
                     <img
                       :src="currentParlamentar.foto || '/placeholder-user.svg'"
-                      :alt="currentParlamentar.nome_civil"
+                      :alt="nomeExibicao"
                       class="w-full h-full object-cover"
                       @error="($event.target as HTMLImageElement).src = '/placeholder-user.svg'"
                     />
                   </div>
 
-                  <h1 class="mt-4 text-xl font-bold text-foreground">{{ currentParlamentar.nome_civil }}</h1>
+                  <h1 class="mt-4 text-xl font-bold text-foreground">{{ nomeExibicao }}</h1>
 
                   <div class="mt-2 flex flex-wrap items-center justify-center gap-2">
                     <BaseBadge variant="outline">Partido: {{ currentParlamentar.sigla_partido }}</BaseBadge>
@@ -80,6 +80,14 @@
                   </div>
 
                   <div class="mt-6 space-y-3 text-sm text-left">
+                    <div class="flex flex-col gap-1">
+                      <div class="flex items-center gap-2 text-muted-foreground">
+                        <User class="h-4 w-4 text-primary" />
+                        <span class="text-xs font-bold uppercase tracking-wider">Nome Civil</span>
+                      </div>
+                      <span class="pl-6">{{ currentParlamentar.nome_civil }}</span>
+                    </div>
+
                     <div class="flex flex-col gap-1">
                       <div class="flex items-center gap-2 text-muted-foreground">
                         <Mail class="h-4 w-4 text-primary" />
@@ -303,7 +311,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ChevronLeft, ChevronRight, Mail, Calendar, GraduationCap, FileText } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Mail, Calendar, GraduationCap, FileText, User } from 'lucide-vue-next'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -325,6 +333,12 @@ const store = computed(() => props.tipo === 'camara' ? camaraStore : senadoStore
 
 const currentParlamentar = computed(() => {
   return props.tipo === 'camara' ? camaraStore.currentDeputado : senadoStore.currentSenador
+})
+
+const nomeExibicao = computed(() => {
+  const p = currentParlamentar.value as any
+  if (!p) return ''
+  return p.nome_eleitoral || p.nome_parlamentar || p.nome_civil || ''
 })
 
 const siglaUf = computed(() => {

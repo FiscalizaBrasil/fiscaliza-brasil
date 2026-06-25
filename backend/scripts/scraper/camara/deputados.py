@@ -6,6 +6,7 @@ import requests
 from ..config import DATA_DIR, CAMARA_API_BASE, LEGISLATURAS
 from ..cache import is_cache_valid, save_json, download_foto
 from ..rate_limiter import camara_limiter
+from .detalhes import fetch_detalhes_deputado
 
 _log = logging.getLogger("CAMARA")
 
@@ -86,6 +87,28 @@ def fetch_deputados_todas_legislaturas(data_dir=None):
             dados = data.get("dados", [])
             for dep in dados:
                 dep_id = dep.get("id")
+                nome = dep.get("nome")
+
+                if not nome:
+                    if dep_id:
+                        try:
+                            detail = fetch_detalhes_deputado(dep_id, data_dir=os.path.join(data_dir, "detalhes"))
+                            nome = (
+                                detail.get("dados", {}).get("ultimoStatus", {}).get("nomeEleitoral")
+                                or detail.get("dados", {}).get("ultimoStatus", {}).get("nome")
+                            )
+                            if nome:
+                                dep["nome"] = nome
+                                _log.info("  -> Nome resolvido via API individual para deputado %s: %s", dep_id, nome)
+                            else:
+                                _log.warning("  -> Deputado %s sem nome (bulk e individual), pulando.", dep_id)
+                                continue
+                        except Exception as e:
+                            _log.warning("  -> Erro ao resolver nome do deputado %s: %s. Pulando.", dep_id, e)
+                            continue
+                    else:
+                        continue
+
                 if dep_id:
                     ids_unicos.add(dep_id)
                 dep["idLegislatura"] = leg

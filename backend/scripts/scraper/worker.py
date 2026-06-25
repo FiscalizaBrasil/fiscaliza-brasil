@@ -401,7 +401,7 @@ def _get_parlamentares_sem_emendas(data_dir=None):
         with open(dep_path, "r", encoding="utf-8") as f:
             dep_data = json.load(f)
         for dep in dep_data.get("dados", []):
-            nome = dep.get("nome", "").strip().upper()
+            nome = (dep.get("nome") or "").strip().upper()
             if nome:
                 nomes_parlamentares.add(nome)
 
@@ -416,7 +416,7 @@ def _get_parlamentares_sem_emendas(data_dir=None):
         )
         for par in parlamentares:
             ident = par.get("IdentificacaoParlamentar", {})
-            nome = ident.get("NomeParlamentar", "").strip().upper()
+            nome = (ident.get("NomeParlamentar") or "").strip().upper()
             if nome:
                 nomes_parlamentares.add(nome)
 

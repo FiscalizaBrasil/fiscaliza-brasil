@@ -205,14 +205,30 @@ def _buscar_e_inserir_senador_api(cursor, cod_senador: int) -> bool:
     return True
 
 
+def _capitalizar_nome(nome: str) -> str:
+    """Converte nome em CAIXA ALTA para capitalização adequada (ex: ISMAEL DOS SANTOS -> Ismael dos Santos)."""
+    if not nome or not nome.strip():
+        return nome
+    excecoes = {"de", "da", "do", "das", "dos", "e"}
+    palavras = nome.strip().split()
+    resultado = []
+    for i, palavra in enumerate(palavras):
+        p = palavra.lower()
+        if i > 0 and p in excecoes:
+            resultado.append(p)
+        else:
+            resultado.append(palavra.capitalize())
+    return " ".join(resultado)
+
+
 # Cache para evitar chamadas repetidas à API de detalhes de deputados
-_deputados_detalhes_cache: dict[int, tuple] = {}  # dep_id -> (situacao, condicao_eleitoral)
+_deputados_detalhes_cache: dict[int, dict] = {}  # dep_id -> {situacao, condicao_eleitoral, nome_eleitoral, nome_civil}
 
 
-def _buscar_situacao_deputado(dep_id: int) -> tuple:
+def _buscar_situacao_deputado(dep_id: int) -> dict:
     """
-    Busca a situação e condição eleitoral de um deputado na API de detalhes.
-    Retorna (situacao, condicao_eleitoral).
+    Busca detalhes de um deputado na API da Câmara (GET /deputados/{id}).
+    Retorna um dict com situacao, condicao_eleitoral, nome_eleitoral e nome_civil.
     
     Usa cache para evitar chamadas repetidas à API.
     """
@@ -222,6 +238,7 @@ def _buscar_situacao_deputado(dep_id: int) -> tuple:
         if dep_id in _deputados_detalhes_cache:
             return _deputados_detalhes_cache[dep_id]
     
+    resultado = {}
     try:
         url = f"https://dadosabertos.camara.leg.br/api/v2/deputados/{dep_id}"
         headers = {"accept": "application/json"}
@@ -229,17 +246,23 @@ def _buscar_situacao_deputado(dep_id: int) -> tuple:
         response.raise_for_status()
         data = response.json()
         
-        ultimo_status = data.get("dados", {}).get("ultimoStatus", {})
-        situacao = ultimo_status.get("situacao")
-        condicao = ultimo_status.get("condicaoEleitoral")
+        dados = data.get("dados", {})
+        ultimo_status = dados.get("ultimoStatus", {})
+        resultado["situacao"] = ultimo_status.get("situacao")
+        resultado["condicao_eleitoral"] = ultimo_status.get("condicaoEleitoral")
+        resultado["nome_eleitoral"] = ultimo_status.get("nomeEleitoral") or ultimo_status.get("nome")
+        resultado["nome_civil"] = _capitalizar_nome(dados.get("nomeCivil") or "") or None
         
         with _global_cache_lock:
-            _deputados_detalhes_cache[dep_id] = (situacao, condicao)
+            _deputados_detalhes_cache[dep_id] = resultado
         time.sleep(0.2)  # Rate limiting
-        return (situacao, condicao)
+        return resultado
     except Exception as e:
         logging.warning(f"Erro ao buscar detalhes do deputado {dep_id}: {e}")
-        return (None, None)
+        resultado = {"situacao": None, "condicao_eleitoral": None, "nome_eleitoral": None, "nome_civil": None}
+        with _global_cache_lock:
+            _deputados_detalhes_cache[dep_id] = resultado
+        return resultado
 
 
 # ============================================================
@@ -311,17 +334,25 @@ def import_deputados_camara(conn) -> bool:
                 ON CONFLICT (id) DO NOTHING
             """, (id_legislatura, f"{ano_inicio}-02-01"))
 
-            # 2. Insere/ignora deputado
+            # 2. Busca situação, condição eleitoral e nomes na API (com cache)
+            detalhes = _buscar_situacao_deputado(dep_id)
+            situacao = detalhes["situacao"]
+            condicao_eleitoral = detalhes["condicao_eleitoral"]
+            nome_eleitoral_api = detalhes.get("nome_eleitoral") or ""
+            nome_civil_api = detalhes.get("nome_civil") or nome  # API tem prioridade, fallback JSON
+
+            # 3. Insere/ignora deputado
             cursor.execute("""
-                INSERT INTO camara.deputados (id, nome_civil, email)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (id) DO NOTHING
-            """, (dep_id, nome, email))
+                INSERT INTO camara.deputados (id, nome_civil, nome_eleitoral, email)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    nome_eleitoral = EXCLUDED.nome_eleitoral
+            """, (dep_id, nome_civil_api, nome_eleitoral_api, email))
 
-            # 3. Busca situação e condição eleitoral na API (com cache)
-            situacao, condicao_eleitoral = _buscar_situacao_deputado(dep_id)
+            # 4. Usa o nome disponível para o mandato (eleitoral da API, fallback civil)
+            nome_exibicao = nome_eleitoral_api or nome_civil_api
 
-            # 4. Insere/ignora mandato (apenas UM por deputado+legislatura)
+            # 5. Insere/ignora mandato (apenas UM por deputado+legislatura)
             # situacao e condicao_eleitoral são preenchidos via API para garantir consistência
             mandato_id = f"{dep_id}_{id_legislatura}"
             cursor.execute("""
@@ -338,7 +369,7 @@ def import_deputados_camara(conn) -> bool:
                     email = EXCLUDED.email,
                     situacao = COALESCE(EXCLUDED.situacao, camara.deputados_mandatos.situacao),
                     condicao_eleitoral = COALESCE(EXCLUDED.condicao_eleitoral, camara.deputados_mandatos.condicao_eleitoral)
-            """, (mandato_id, dep_id, id_legislatura, nome,
+            """, (mandato_id, dep_id, id_legislatura, nome_exibicao,
                   partido, uf, url_foto, email,
                   situacao, condicao_eleitoral))
             
@@ -632,15 +663,23 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                                     ON CONFLICT (id) DO NOTHING
                                 """, (id_legislatura, f"{ano_inicio}-02-01"))
                             
+                            # Busca situação, condição eleitoral e nomes na API (com cache)
+                            detalhes = _buscar_situacao_deputado(dep_id)
+                            situacao = detalhes["situacao"]
+                            condicao_eleitoral = detalhes["condicao_eleitoral"]
+                            nome_eleitoral_api = detalhes.get("nome_eleitoral") or ""
+                            nome_civil_api = detalhes.get("nome_civil") or nome
+
                             cursor.execute("""
-                                INSERT INTO camara.deputados (id, nome_civil, email)
-                                VALUES (%s, %s, %s)
-                                ON CONFLICT (id) DO NOTHING
-                            """, (dep_id, nome, email))
-                            
+                                INSERT INTO camara.deputados (id, nome_civil, nome_eleitoral, email)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (id) DO UPDATE SET
+                                    nome_eleitoral = EXCLUDED.nome_eleitoral
+                            """, (dep_id, nome_civil_api, nome_eleitoral_api, email))
+
+                            nome_exibicao = nome_eleitoral_api or nome_civil_api
+
                             if id_legislatura:
-                                # Busca situação e condição eleitoral na API (com cache)
-                                situacao, condicao_eleitoral = _buscar_situacao_deputado(dep_id)
                                 mandato_id = f"{dep_id}_{id_legislatura}"
                                 ano_inicio = legislatura_anos(id_legislatura)[0]
                                 cursor.execute("""
@@ -650,11 +689,11 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                                          situacao, condicao_eleitoral)
                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                                     ON CONFLICT (id) DO NOTHING
-                                """, (mandato_id, dep_id, id_legislatura, nome,
+                                """, (mandato_id, dep_id, id_legislatura, nome_exibicao,
                                       partido, uf, url_foto, email,
                                       situacao, condicao_eleitoral))
                                 conn.commit()
-                                logging.info(f"Deputado {dep_id} ({nome}) cadastrado dinamicamente a partir do JSON.")
+                                logging.info(f"Deputado {dep_id} ({nome_exibicao}) cadastrado dinamicamente a partir do JSON.")
                                 mandatos_info = [(mandato_id, id_legislatura, ano_inicio)]
                             else:
                                 logging.warning(f"Deputado {dep_id} encontrado no JSON mas sem idLegislatura. Pulando.")
@@ -1303,6 +1342,10 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
     total_inseridos = 0
     
     with conn.cursor() as cursor:
+        # Pre-carrega nome_civil de todos os deputados para popular historico
+        cursor.execute("SELECT id, nome_civil FROM camara.deputados")
+        nome_civil_map = {row[0]: row[1] for row in cursor.fetchall()}
+        
         for fname in arquivos:
             try:
                 dep_id = int(fname.replace(".json", ""))
@@ -1331,8 +1374,8 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
                             INSERT INTO camara.deputados_historico
                                 (deputado_id, data_hora, situacao, condicao_eleitoral,
                                  descricao_status, sigla_partido, sigla_uf,
-                                 nome_eleitoral, url_foto, id_legislatura)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                 nome_eleitoral, nome_civil, url_foto, id_legislatura)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (deputado_id, data_hora) DO NOTHING
                         """, (
                             dep_id,
@@ -1343,6 +1386,7 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
                             evento.get("siglaPartido"),
                             evento.get("siglaUf"),
                             evento.get("nomeEleitoral"),
+                            nome_civil_map.get(dep_id),
                             evento.get("urlFoto"),
                             evento.get("idLegislatura")
                         ))
@@ -1379,7 +1423,7 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
 def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
     """
     Lê os JSONs de detalhes em backend/data/camara/detalhes/
-    e atualiza situacao e condicao_eleitoral na tabela camara.deputados_mandatos.
+    e atualiza situacao, condicao_eleitoral e nome_eleitoral no banco.
     
     Cada JSON contém o ultimoStatus do deputado, que reflete sua situação
     atual (Exercício, Suplência, Licença, etc.) e condição eleitoral
@@ -1394,6 +1438,7 @@ def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
             "ultimoStatus": {
                 "situacao": "Exercício",
                 "condicaoEleitoral": "Titular",
+                "nomeEleitoral": "Nome Parlamentar",
                 ...
             },
             ...
@@ -1446,6 +1491,15 @@ def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
                           AND (situacao IS DISTINCT FROM %s
                             OR condicao_eleitoral IS DISTINCT FROM %s)
                     """, (situacao, condicao, dep_id, situacao, condicao))
+
+                    # Atualiza nome_eleitoral em camara.deputados
+                    nome_eleitoral = ultimo_status.get("nomeEleitoral")
+                    if nome_eleitoral:
+                        cursor.execute("""
+                            UPDATE camara.deputados
+                            SET nome_eleitoral = %s
+                            WHERE id = %s AND (nome_eleitoral IS NULL OR nome_eleitoral != %s)
+                        """, (nome_eleitoral, dep_id, nome_eleitoral))
                 
                 if cursor.rowcount > 0:
                     total_atualizados += cursor.rowcount
@@ -2244,15 +2298,15 @@ def import_all_data(conn) -> bool:
     except Exception as e:
         logging.error(f"Erro em import_emendas: {e}")
     try:
-        if import_historico_deputados(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_historico_deputados: {e}")
-    try:
         if import_detalhes_deputados(conn):
             imported = True
     except Exception as e:
         logging.error(f"Erro em import_detalhes_deputados: {e}")
+    try:
+        if import_historico_deputados(conn):
+            imported = True
+    except Exception as e:
+        logging.error(f"Erro em import_historico_deputados: {e}")
     try:
         if import_processos_senado(conn):
             imported = True

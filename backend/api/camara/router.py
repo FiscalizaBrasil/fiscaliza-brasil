@@ -537,6 +537,7 @@ def get_todos_deputados(
                 SELECT DISTINCT ON (d.id)
                     d.id, 
                     d.nome_civil,
+                    COALESCE(d.nome_eleitoral, m.nome_eleitoral) as nome_eleitoral,
                     m.sigla_partido,
                     m.sigla_uf as uf,
                     m.url_foto
@@ -562,9 +563,10 @@ def get_todos_deputados(
                 {
                     "id": r[0],
                     "nome_civil": r[1],
-                    "sigla_partido": r[2] if r[2] else "S/P",
-                    "uf": r[3],
-                    "foto": get_foto_url_camara(r[0], r[4])
+                    "nome_eleitoral": r[2],
+                    "sigla_partido": r[3] if r[3] else "S/P",
+                    "uf": r[4],
+                    "foto": get_foto_url_camara(r[0], r[5])
                 }
                 for r in res
             ]
@@ -770,7 +772,8 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
         with db_cursor() as cursor:
             # 1. Buscar Perfil (Resiliente a legislatura inexistente)
             query_perfil = """
-                SELECT d.id, d.nome_civil, d.cpf, d.sexo, d.email, d.data_nascimento, 
+                SELECT d.id, COALESCE(d.nome_eleitoral, m.nome_eleitoral) as nome_eleitoral,
+                       d.nome_civil, d.cpf, d.sexo, d.email, d.data_nascimento, 
                        d.escolaridade, d.uf_nascimento, d.municipio_nascimento, 
                        m.sigla_partido, m.sigla_uf, m.legislatura_id
                 FROM camara.deputados d
@@ -799,20 +802,21 @@ def get_perfil_deputado(legislatura: int, deputado_id: int):
                     raise HTTPException(status_code=404, detail=f"Deputado com ID {deputado_id} não possui mandatos registrados")
 
             # A legislatura efetivamente encontrada
-            leg_efetiva = row[11]
+            leg_efetiva = row[12]
             
             res = {
                 "id": row[0],
-                "nome_civil": row[1],
-                "cpf": row[2],
-                "sexo": row[3],
-                "email": row[4],
-                "data_nascimento": row[5].isoformat() if isinstance(row[5], date) else None,
-                "escolaridade": row[6],
-                "uf_nascimento": row[7],
-                "municipio_nascimento": row[8],
-                "sigla_partido": row[9] if row[9] else "S/P",
-                "sigla_uf": row[10],
+                "nome_eleitoral": row[1] or row[2] or "",
+                "nome_civil": row[2],
+                "cpf": row[3],
+                "sexo": row[4],
+                "email": row[5],
+                "data_nascimento": row[6].isoformat() if isinstance(row[6], date) else None,
+                "escolaridade": row[7],
+                "uf_nascimento": row[8],
+                "municipio_nascimento": row[9],
+                "sigla_partido": row[10] if row[10] else "S/P",
+                "sigla_uf": row[11],
                 "foto": get_foto_url_camara(row[0], f"https://www.camara.leg.br/internet/deputado/bandep/{row[0]}.jpg"),
                 "legislatura_exibida": 0 if legislatura == 0 else leg_efetiva
             }

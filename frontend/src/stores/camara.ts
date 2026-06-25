@@ -5,6 +5,7 @@ import { absolutizeFoto } from "@/lib/foto"
 export interface Deputado {
   id: number
   nome: string
+  nome_civil?: string
   partido: string
   estado: string
   foto: string
@@ -28,6 +29,7 @@ export interface ProjetoLegislativo {
 export interface DeputadoDetail {
   id: number
   nome_civil: string
+  nome_eleitoral?: string
   cpf: string
   sexo: string
   email: string
@@ -343,7 +345,8 @@ export const useCamaraStore = defineStore("camara", () => {
       const data = await response.json()
       deputadosList.value = data.map((d: any) => ({
         id: d.id,
-        nome: d.nome_civil,
+        nome: d.nome_eleitoral || d.nome_civil,
+        nome_civil: d.nome_civil,
         partido: d.sigla_partido,
         estado: d.uf,
         foto: absolutizeFoto(d.foto, `https://www.camara.leg.br/internet/deputado/bandep/${d.id}.jpg`)

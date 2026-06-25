@@ -39,6 +39,7 @@ def ensure_schema(cursor):
         CREATE TABLE IF NOT EXISTS camara.deputados (
             id INTEGER PRIMARY KEY,
             nome_civil TEXT NOT NULL,
+            nome_eleitoral TEXT,
             cpf VARCHAR(14) UNIQUE,
             sexo CHAR(1),
             data_nascimento DATE,
@@ -243,6 +244,7 @@ def ensure_schema(cursor):
             sigla_partido VARCHAR(20),
             sigla_uf CHAR(2),
             nome_eleitoral TEXT,
+            nome_civil TEXT,
             url_foto TEXT,
             id_legislatura INTEGER,
             UNIQUE(deputado_id, data_hora)
