@@ -83,13 +83,13 @@ def fetch_votacoes_ano(ano, data_dir=None):
 
 def fetch_votos_votacao(votacao_id, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "votacoes", "votos")
+        data_dir = os.path.join(DATA_DIR, "camara", "votacoes", str(votacao_id))
 
     os.makedirs(data_dir, exist_ok=True)
 
     url = f"https://dadosabertos.camara.leg.br/api/v2/votacoes/{votacao_id}/votos"
 
-    filepath = os.path.join(data_dir, f"{votacao_id}.json")
+    filepath = os.path.join(data_dir, "votos.json")
 
     return fetch_paginated(
         url=url,

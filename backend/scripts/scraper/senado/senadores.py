@@ -37,9 +37,9 @@ def fetch_senadores_senado(data_dir=None):
 
 def fetch_senadores_legislatura(legislatura, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "senado")
+        data_dir = os.path.join(DATA_DIR, "senado", "senadores")
 
-    filepath = os.path.join(data_dir, f"senadores_legislatura_{legislatura}.json")
+    filepath = os.path.join(data_dir, f"legislatura_{legislatura}.json")
 
     if is_cache_valid(filepath):
         _log.info("Cache válido para senadores legislatura %s. Pulando download.", legislatura)

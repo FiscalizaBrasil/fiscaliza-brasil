@@ -64,16 +64,16 @@ def fetch_tipos_senado():
 def _build_senado_from_detalhes(siglas: set[str] | None = None) -> dict[str, str]:
     from scripts.scraper.config import DATA_DIR
 
-    detalhes_dir = os.path.join(DATA_DIR, "senado", "processos", "detalhes")
-    if not os.path.isdir(detalhes_dir):
+    processos_dir = os.path.join(DATA_DIR, "senado", "processos")
+    if not os.path.isdir(processos_dir):
         return {}
 
     names: dict[str, str] = {}
-    for fname in sorted(os.listdir(detalhes_dir)):
+    for fname in sorted(os.listdir(processos_dir)):
         if not fname.endswith(".json"):
             continue
         try:
-            with open(os.path.join(detalhes_dir, fname), "r", encoding="utf-8") as f:
+            with open(os.path.join(processos_dir, fname), "r", encoding="utf-8") as f:
                 data = json.load(f)
             sigla = (data.get("sigla") or "").strip()
             descricao = (data.get("descricaoSigla") or "").strip()

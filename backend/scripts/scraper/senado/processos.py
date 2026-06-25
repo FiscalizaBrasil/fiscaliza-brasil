@@ -12,7 +12,7 @@ _log = logging.getLogger("SENADO")
 
 def fetch_processos_senado_ano(ano, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "senado", "processos")
+        data_dir = os.path.join(DATA_DIR, "senado", "processos", "ano")
 
     os.makedirs(data_dir, exist_ok=True)
     filepath = os.path.join(data_dir, f"{ano}.json")
@@ -47,7 +47,7 @@ def fetch_processos_senado_ano(ano, data_dir=None):
 
 def fetch_processos_senado_todas(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "senado", "processos")
+        data_dir = os.path.join(DATA_DIR, "senado", "processos", "ano")
 
     for ano in ANOS_PADRAO:
         _log.info("Baixando processos para ano %s...", ano)
@@ -60,7 +60,7 @@ def fetch_processos_senado_todas(data_dir=None):
 
 def fetch_detalhe_processo_senado(processo_id, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "senado", "processos", "detalhes")
+        data_dir = os.path.join(DATA_DIR, "senado", "processos")
 
     os.makedirs(data_dir, exist_ok=True)
     filepath = os.path.join(data_dir, f"{processo_id}.json")
@@ -94,26 +94,25 @@ def fetch_detalhes_processos_senado(data_dir=None):
         _log.warning("Diretório de processos não encontrado.")
         return
 
+    ano_dir = os.path.join(data_dir, "ano")
     todos_processos = []
-    for fname in sorted(os.listdir(data_dir)):
-        if not fname.endswith(".json") or fname.startswith("detalhes"):
-            continue
-        filepath = os.path.join(data_dir, fname)
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            for proc in data:
-                proc_id = proc.get("id")
-                if proc_id:
-                    todos_processos.append(proc_id)
+    if os.path.isdir(ano_dir):
+        for fname in sorted(os.listdir(ano_dir)):
+            if not fname.endswith(".json"):
+                continue
+            filepath = os.path.join(ano_dir, fname)
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                for proc in data:
+                    proc_id = proc.get("id")
+                    if proc_id:
+                        todos_processos.append(proc_id)
 
     _log.info("Buscando detalhes de %d processos...", len(todos_processos))
 
-    detalhes_dir = os.path.join(data_dir, "detalhes")
-    os.makedirs(detalhes_dir, exist_ok=True)
-
     for proc_id in sorted(todos_processos):
-        filepath = os.path.join(detalhes_dir, f"{proc_id}.json")
+        filepath = os.path.join(data_dir, f"{proc_id}.json")
         if os.path.isfile(filepath) and is_cache_valid(filepath):
             continue
-        fetch_detalhe_processo_senado(proc_id, data_dir=detalhes_dir)
+        fetch_detalhe_processo_senado(proc_id)

@@ -16,7 +16,7 @@ def fetch_deputados_camara(data_dir=None, legislatura=None):
         data_dir = os.path.join(DATA_DIR, "camara")
 
     if legislatura:
-        filepath = os.path.join(data_dir, f"deputados_legislatura_{legislatura}.json")
+        filepath = os.path.join(data_dir, "deputados", f"legislatura_{legislatura}.json")
     else:
         filepath = os.path.join(data_dir, "deputados.json")
 
@@ -92,7 +92,7 @@ def fetch_deputados_todas_legislaturas(data_dir=None):
                 if not nome:
                     if dep_id:
                         try:
-                            detail = fetch_detalhes_deputado(dep_id, data_dir=os.path.join(data_dir, "detalhes"))
+                            detail = fetch_detalhes_deputado(dep_id)
                             nome = (
                                 detail.get("dados", {}).get("ultimoStatus", {}).get("nomeEleitoral")
                                 or detail.get("dados", {}).get("ultimoStatus", {}).get("nome")

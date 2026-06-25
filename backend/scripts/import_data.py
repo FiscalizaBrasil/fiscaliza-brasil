@@ -21,7 +21,7 @@ try:
     from database import db
     from database.db import savepoint
     from database.utils import legislatura_anos
-    from scripts.scraper.cache import is_cache_valid, save_json
+    from scripts.scraper.cache import is_cache_valid, save_json, remover_acentos
     from scripts.scraper.rate_limiter import senado_legis_limiter
     from scripts.scraper.verification import mark_verified
 except ImportError as e:
@@ -66,8 +66,8 @@ def _buscar_e_inserir_senador_api(cursor, cod_senador: int) -> bool:
             return False
         _senadores_buscados_api.add(cod_senador)
     
-    detalhes_dir = os.path.join(DATA_DIR, "senado", "detalhes")
-    cache_path = os.path.join(detalhes_dir, f"{cod_senador}.json")
+    detalhes_dir = os.path.join(DATA_DIR, "senado", "senadores", str(cod_senador))
+    cache_path = os.path.join(detalhes_dir, "detalhes.json")
     
     # 1. Tenta carregar do cache em disco
     if is_cache_valid(cache_path):
@@ -553,7 +553,7 @@ def _inserir_despesa(cursor, despesa: dict, mandato_id: str) -> int:
 
 def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
     """
-    Lê os JSONs de despesas em backend/data/camara/despesas/{deputado_id}/
+    Lê os JSONs de despesas em backend/data/camara/deputados/{deputado_id}/despesas/
     e insere/atualiza os dados na tabela camara.deputados_despesas.
     
     Se deputado_id for fornecido, processa APENAS aquele deputado (importação incremental).
@@ -588,7 +588,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
     global _despesas_camara_importadas
     
     with _import_lock:
-        despesas_dir = os.path.join(DATA_DIR, "camara", "despesas")
+        despesas_dir = os.path.join(DATA_DIR, "camara", "deputados")
         if not os.path.isdir(despesas_dir):
             logging.warning(f"Diretório de despesas não encontrado: {despesas_dir}")
             return None
@@ -616,12 +616,12 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
             # Modo completo: processa todos os deputados
             dep_ids = []
             for dep_id_str in os.listdir(despesas_dir):
-                dep_dir = os.path.join(despesas_dir, dep_id_str)
+                dep_dir = os.path.join(despesas_dir, dep_id_str, "despesas")
                 if os.path.isdir(dep_dir):
                     dep_ids.append((dep_id_str, int(dep_id_str)))
         
         for dep_id_str, dep_id in dep_ids:
-            dep_dir = os.path.join(despesas_dir, dep_id_str)
+            dep_dir = os.path.join(despesas_dir, dep_id_str, "despesas")
             if not os.path.isdir(dep_dir):
                 continue
             
@@ -726,7 +726,7 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                     ]
                     
                     if leg_subdirs:
-                        # === NOVO FORMATO: despesas/{dep_id}/{legislatura}/{ano}_pagina{n}.json ===
+                        # === NOVO FORMATO: deputados/{dep_id}/despesas/{legislatura}/{ano}.json ===
                         for leg_str in sorted(leg_subdirs):
                             leg_id = int(leg_str)
                             leg_dir = os.path.join(dep_dir, leg_str)
@@ -757,29 +757,8 @@ def import_despesas_camara(conn, deputado_id: int = None) -> Optional[bool]:
                             if json_count_leg > 0 and json_count_leg == db_count_leg:
                                 mark_verified("camara_despesas", f"{dep_id}_{leg_id}", json_count_leg, db_count_leg)
                     else:
-                        # === FORMATO ANTIGO: despesas/{dep_id}/{ano}_pagina{n}.json (backward compat) ===
-                        for fname in sorted(dir_contents):
-                            if not fname.endswith(".json"):
-                                continue
-                            
-                            try:
-                                ano_arquivo = int(fname.replace('.json', '').split('_')[0])
-                            except (ValueError, IndexError):
-                                ano_arquivo = None
-                            
-                            mandato_id = mandato_por_ano.get(ano_arquivo, mandato_fallback)
-                            
-                            filepath = os.path.join(dep_dir, fname)
-                            with open(filepath, "r", encoding="utf-8") as f:
-                                data = json.load(f)
-                            
-                            dados = data.get("dados", [])
-                            if not dados:
-                                continue
-                            
-                            for despesa in dados:
-                                inseridos_dep += _inserir_despesa(cursor, despesa, mandato_id)
-                            conn.commit()
+                        # Sem subdirs de legislatura — estrutura não suportada, pula
+                        continue
                     
                     total_inseridos += inseridos_dep
                     if inseridos_dep > 0:
@@ -812,7 +791,7 @@ def import_processos_senado(conn, ano: int = None) -> bool:
     
     A listagem da API /processo retorna dados básicos. Os detalhes completos
     (incluindo autoriaIniciativa com codigoParlamentar) são buscados do endpoint
-    /processo/{id} e salvos em backend/data/senado/processos/detalhes/.
+    /processo/{id} e salvos em backend/data/senado/processos/{id}.json.
     
     Estrutura da listagem (/processo?ano=...):
     [
@@ -892,11 +871,15 @@ def import_processos_senado(conn, ano: int = None) -> bool:
         logging.warning(f"Diretório de processos não encontrado: {processos_dir}")
         return False
     
+    ano_dir = os.path.join(processos_dir, "ano")
+    
     # Determina quais arquivos processar
     if ano is not None:
         arquivos = [f"{ano}.json"]
     else:
-        arquivos = sorted([f for f in os.listdir(processos_dir) if f.endswith(".json") and not f.startswith("detalhes")])
+        arquivos = []
+        if os.path.isdir(ano_dir):
+            arquivos = sorted([f for f in os.listdir(ano_dir) if f.endswith(".json")])
     
     if not arquivos:
         return False
@@ -906,7 +889,7 @@ def import_processos_senado(conn, ano: int = None) -> bool:
     
     with conn.cursor() as cursor:
         for fname in arquivos:
-            filepath = os.path.join(processos_dir, fname)
+            filepath = os.path.join(ano_dir, fname)
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
@@ -1020,8 +1003,7 @@ def import_processos_senado(conn, ano: int = None) -> bool:
                             total_atualizados += 1
                     
                     # --- Processa detalhes se disponíveis ---
-                    detalhes_dir = os.path.join(processos_dir, "detalhes")
-                    detalhe_filepath = os.path.join(detalhes_dir, f"{proc.get('id')}.json")
+                    detalhe_filepath = os.path.join(processos_dir, f"{proc.get('id')}.json")
                     
                     if os.path.isfile(detalhe_filepath):
                         with open(detalhe_filepath, "r", encoding="utf-8") as df:
@@ -1298,7 +1280,7 @@ def import_despesas_senado(conn, ano: int = None) -> Optional[bool]:
 
 def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
     """
-    Lê os JSONs de histórico em backend/data/camara/historico/
+    Lê os JSONs de histórico em backend/data/camara/deputados/{id}/historico.json
     e insere na tabela camara.deputados_historico.
     
     Cada evento do histórico representa uma mudança na carreira do deputado:
@@ -1325,35 +1307,37 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
         ]
     }
     """
-    historico_dir = os.path.join(DATA_DIR, "camara", "historico")
-    if not os.path.isdir(historico_dir):
-        logging.warning(f"Diretório de histórico não encontrado: {historico_dir}")
+    deputados_dir = os.path.join(DATA_DIR, "camara", "deputados")
+    if not os.path.isdir(deputados_dir):
+        logging.warning(f"Diretório de deputados não encontrado: {deputados_dir}")
         return None
     
     # Determina quais arquivos processar
     if deputado_id is not None:
-        arquivos = [f"{deputado_id}.json"]
+        arquivos = [(deputado_id, f"{deputado_id}.json")]
     else:
-        arquivos = sorted([f for f in os.listdir(historico_dir) if f.endswith(".json")])
-    
+        arquivos = []
+        for dep_id_str in sorted(os.listdir(deputados_dir)):
+            dep_dir = os.path.join(deputados_dir, dep_id_str)
+            if not os.path.isdir(dep_dir):
+                continue
+            historico_file = os.path.join(dep_dir, "historico.json")
+            if os.path.isfile(historico_file):
+                try:
+                    arquivos.append((int(dep_id_str), historico_file))
+                except ValueError:
+                    continue
+
     if not arquivos:
         return None
     
     total_inseridos = 0
     
     with conn.cursor() as cursor:
-        # Pre-carrega nome_civil de todos os deputados para popular historico
         cursor.execute("SELECT id, nome_civil FROM camara.deputados")
         nome_civil_map = {row[0]: row[1] for row in cursor.fetchall()}
         
-        for fname in arquivos:
-            try:
-                dep_id = int(fname.replace(".json", ""))
-            except ValueError:
-                logging.warning(f"Nome de arquivo de histórico malformado: {fname}, ignorando.")
-                continue
-            
-            filepath = os.path.join(historico_dir, fname)
+        for dep_id, filepath in arquivos:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
@@ -1422,7 +1406,7 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
 
 def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
     """
-    Lê os JSONs de detalhes em backend/data/camara/detalhes/
+    Lê os JSONs de detalhes em backend/data/camara/deputados/{id}/detalhes.json
     e atualiza situacao, condicao_eleitoral e nome_eleitoral no banco.
     
     Cada JSON contém o ultimoStatus do deputado, que reflete sua situação
@@ -1445,27 +1429,34 @@ def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
         }
     }
     """
-    detalhes_dir = os.path.join(DATA_DIR, "camara", "detalhes")
-    if not os.path.isdir(detalhes_dir):
-        logging.warning(f"Diretório de detalhes não encontrado: {detalhes_dir}")
+    deputados_dir = os.path.join(DATA_DIR, "camara", "deputados")
+    if not os.path.isdir(deputados_dir):
+        logging.warning(f"Diretório de deputados não encontrado: {deputados_dir}")
         return None
     
     # Determina quais arquivos processar
     if deputado_id is not None:
-        arquivos = [f"{deputado_id}.json"]
+        arquivos = [(deputado_id, os.path.join(deputados_dir, str(deputado_id), "detalhes.json"))]
     else:
-        arquivos = sorted([f for f in os.listdir(detalhes_dir) if f.endswith(".json")])
-    
+        arquivos = []
+        for dep_id_str in sorted(os.listdir(deputados_dir)):
+            dep_dir = os.path.join(deputados_dir, dep_id_str)
+            if not os.path.isdir(dep_dir):
+                continue
+            detalhes_file = os.path.join(dep_dir, "detalhes.json")
+            if os.path.isfile(detalhes_file):
+                try:
+                    arquivos.append((int(dep_id_str), detalhes_file))
+                except ValueError:
+                    continue
+
     if not arquivos:
         return None
     
     total_atualizados = 0
     
     with conn.cursor() as cursor:
-        for fname in arquivos:
-            dep_id = int(fname.replace(".json", ""))
-            
-            filepath = os.path.join(detalhes_dir, fname)
+        for dep_id, filepath in arquivos:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
@@ -1528,7 +1519,7 @@ def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
 
 def import_proposicoes_camara(conn, ano: int = None) -> Optional[bool]:
     """
-    Lê os JSONs de proposições em backend/data/camara/proposicoes/
+    Lê os JSONs de proposições em backend/data/camara/proposicoes/ano/
     e insere/atualiza os dados na tabela camara.proposicoes.
     
     Se ano for fornecido, processa APENAS aquele ano (importação incremental).
@@ -1550,7 +1541,7 @@ def import_proposicoes_camara(conn, ano: int = None) -> Optional[bool]:
         ]
     }
     """
-    proposicoes_dir = os.path.join(DATA_DIR, "camara", "proposicoes")
+    proposicoes_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "ano")
     if not os.path.isdir(proposicoes_dir):
         logging.warning(f"Diretório de proposições não encontrado: {proposicoes_dir}")
         return None
@@ -1628,12 +1619,12 @@ def import_proposicoes_camara(conn, ano: int = None) -> Optional[bool]:
 def import_proposicoes_deputado(conn, deputado_id: int) -> Optional[bool]:
     """
     Lê os JSONs de proposições de um deputado específico em
-     backend/data/camara/proposicoes/deputados/{deputado_id}.json
+     backend/data/camara/proposicoes/autor/{deputado_id}.json
     e insere/atualiza os dados na tabela camara.proposicoes.
     
     A estrutura do JSON é a mesma da listagem geral (via API com idDeputadoAutor).
     """
-    proposicoes_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "deputados")
+    proposicoes_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "autor")
     if not os.path.isdir(proposicoes_dir):
         logging.warning(f"Diretório de proposições por deputado não encontrado: {proposicoes_dir}")
         return None
@@ -1883,36 +1874,47 @@ def import_votacoes_camara(conn, ano: int = None) -> Optional[bool]:
 
 def import_detalhes_proposicoes(conn, ano: int = None) -> bool:
     """
-    Lê os JSONs de detalhes em backend/data/camara/proposicoes/detalhes/
+    Lê os JSONs de detalhes em backend/data/camara/proposicoes/{id}/detalhes.json
     e atualiza os campos adicionais na tabela camara.proposicoes
     (descricao_tipo, ementa_detalhada, keywords, url_inteiro_teor, etc.).
     
     Se ano for fornecido, processa APENAS proposições daquele ano.
     Caso contrário, processa todos os detalhes disponíveis.
     """
-    detalhes_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "detalhes")
-    if not os.path.isdir(detalhes_dir):
-        logging.warning(f"Diretório de detalhes não encontrado: {detalhes_dir}")
+    proposicoes_dir = os.path.join(DATA_DIR, "camara", "proposicoes")
+    if not os.path.isdir(proposicoes_dir):
+        logging.warning(f"Diretório de proposições não encontrado: {proposicoes_dir}")
         return False
     
-    arquivos = sorted([f for f in os.listdir(detalhes_dir) if f.endswith(".json")])
+    arquivos = []
+    for prop_id_str in sorted(os.listdir(proposicoes_dir)):
+        prop_dir = os.path.join(proposicoes_dir, prop_id_str)
+        if not os.path.isdir(prop_dir):
+            continue
+        detalhes_file = os.path.join(prop_dir, "detalhes.json")
+        if not os.path.isfile(detalhes_file):
+            continue
+        try:
+            prop_id = int(prop_id_str)
+        except ValueError:
+            continue
+        # Se ano foi especificado, verifica se a proposição é daquele ano
+        if ano is not None:
+            cursor = conn.cursor()
+            cursor.execute("SELECT ano FROM camara.proposicoes WHERE id = %s", (prop_id,))
+            row = cursor.fetchone()
+            cursor.close()
+            if not row or row[0] != ano:
+                continue
+        arquivos.append((prop_id, detalhes_file))
+    
     if not arquivos:
         return False
     
     total_atualizados = 0
     
     with conn.cursor() as cursor:
-        for fname in arquivos:
-            prop_id = int(fname.replace(".json", ""))
-            
-            # Se ano foi especificado, verifica se a proposição é daquele ano
-            if ano is not None:
-                cursor.execute("SELECT ano FROM camara.proposicoes WHERE id = %s", (prop_id,))
-                row = cursor.fetchone()
-                if not row or row[0] != ano:
-                    continue
-            
-            filepath = os.path.join(detalhes_dir, fname)
+        for prop_id, filepath in arquivos:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
@@ -1965,7 +1967,7 @@ def import_detalhes_proposicoes(conn, ano: int = None) -> bool:
 
 def import_autores_proposicoes(conn, ano: int = None) -> bool:
     """
-    Lê os JSONs de autores em backend/data/camara/proposicoes/autores/
+    Lê os JSONs de autores em backend/data/camara/proposicoes/{id}/autores.json
     e insere na tabela camara.proposicoes_autores.
     
     Tenta identificar se o autor é um deputado conhecido no banco
@@ -1973,29 +1975,40 @@ def import_autores_proposicoes(conn, ano: int = None) -> bool:
     
     Se ano for fornecido, processa APENAS proposições daquele ano.
     """
-    autores_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "autores")
-    if not os.path.isdir(autores_dir):
-        logging.warning(f"Diretório de autores não encontrado: {autores_dir}")
+    proposicoes_dir = os.path.join(DATA_DIR, "camara", "proposicoes")
+    if not os.path.isdir(proposicoes_dir):
+        logging.warning(f"Diretório de proposições não encontrado: {proposicoes_dir}")
         return False
     
-    arquivos = sorted([f for f in os.listdir(autores_dir) if f.endswith(".json")])
+    arquivos = []
+    for prop_id_str in sorted(os.listdir(proposicoes_dir)):
+        prop_dir = os.path.join(proposicoes_dir, prop_id_str)
+        if not os.path.isdir(prop_dir):
+            continue
+        autores_file = os.path.join(prop_dir, "autores.json")
+        if not os.path.isfile(autores_file):
+            continue
+        try:
+            prop_id = int(prop_id_str)
+        except ValueError:
+            continue
+        # Se ano foi especificado, verifica se a proposição é daquele ano
+        if ano is not None:
+            cursor = conn.cursor()
+            cursor.execute("SELECT ano FROM camara.proposicoes WHERE id = %s", (prop_id,))
+            row = cursor.fetchone()
+            cursor.close()
+            if not row or row[0] != ano:
+                continue
+        arquivos.append((prop_id, autores_file))
+    
     if not arquivos:
         return False
     
     total_inseridos = 0
     
     with conn.cursor() as cursor:
-        for fname in arquivos:
-            prop_id = int(fname.replace(".json", ""))
-            
-            # Se ano foi especificado, verifica se a proposição é daquele ano
-            if ano is not None:
-                cursor.execute("SELECT ano FROM camara.proposicoes WHERE id = %s", (prop_id,))
-                row = cursor.fetchone()
-                if not row or row[0] != ano:
-                    continue
-            
-            filepath = os.path.join(autores_dir, fname)
+        for prop_id, filepath in arquivos:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
@@ -2170,6 +2183,15 @@ def import_emendas(conn, arquivo: str = None) -> Optional[bool]:
             else:
                 parlamentar_prefix = prefixo_arquivo
 
+            # Filtra emendas por match exato no nomeAutor (API do Portal faz substring match)
+            nome_esperado = remover_acentos(parlamentar_prefix.replace("_", " ").upper())
+            emendas_lista = [
+                e for e in emendas_lista
+                if remover_acentos((e.get("nomeAutor") or "").strip().upper()) == nome_esperado
+            ]
+            if not emendas_lista:
+                continue
+
             if parlamentar_prefix not in autor_por_prefix:
                 autor_por_prefix[parlamentar_prefix] = emendas_lista[0].get("nomeAutor", "")
 
@@ -2223,13 +2245,11 @@ def import_emendas(conn, arquivo: str = None) -> Optional[bool]:
         for parlamentar_prefix, json_count in json_counts_by_prefix.items():
             if json_count == 0:
                 continue
-            nome_autor = autor_por_prefix.get(parlamentar_prefix, "")
-            if not nome_autor:
-                continue
+            nome_esperado = parlamentar_prefix.replace("_", " ").upper()
             try:
                 cursor.execute(
                     "SELECT COUNT(*) FROM portal.emendas WHERE lower(autor) = lower(%s)",
-                    (nome_autor,),
+                    (nome_esperado,),
                 )
                 db_count = cursor.fetchone()[0]
                 if json_count > 0 and json_count == db_count:

@@ -11,10 +11,10 @@ _log = logging.getLogger("CAMARA")
 
 def fetch_detalhes_deputado(deputado_id, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "detalhes")
+        data_dir = os.path.join(DATA_DIR, "camara", "deputados", str(deputado_id))
 
     os.makedirs(data_dir, exist_ok=True)
-    filepath = os.path.join(data_dir, f"{deputado_id}.json")
+    filepath = os.path.join(data_dir, "detalhes.json")
 
     url = f"https://dadosabertos.camara.leg.br/api/v2/deputados/{deputado_id}"
     return fetch_single(
@@ -26,7 +26,7 @@ def fetch_detalhes_deputado(deputado_id, data_dir=None):
 
 def fetch_detalhes_todos_deputados(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "detalhes")
+        data_dir = os.path.join(DATA_DIR, "camara", "deputados")
 
     json_path = os.path.join(DATA_DIR, "camara", "deputados.json")
     if not os.path.isfile(json_path):
@@ -49,7 +49,8 @@ def fetch_detalhes_todos_deputados(data_dir=None):
     _log.info("Buscando detalhes de %d deputados...", len(ids_unicos))
 
     for dep_id in sorted(ids_unicos):
-        filepath = os.path.join(data_dir, f"{dep_id}.json")
+        dep_dir = os.path.join(data_dir, str(dep_id))
+        filepath = os.path.join(dep_dir, "detalhes.json")
         if os.path.isfile(filepath) and is_cache_valid(filepath):
             continue
-        fetch_detalhes_deputado(dep_id, data_dir=data_dir)
+        fetch_detalhes_deputado(dep_id)

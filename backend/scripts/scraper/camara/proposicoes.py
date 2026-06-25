@@ -12,7 +12,7 @@ _log = logging.getLogger("CAMARA")
 
 def fetch_proposicoes_ano(ano, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes")
+        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "ano")
 
     os.makedirs(data_dir, exist_ok=True)
 
@@ -41,7 +41,7 @@ def fetch_proposicoes_ano(ano, data_dir=None):
 
 def fetch_proposicoes_deputado(deputado_id, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "deputados")
+        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "autor")
 
     os.makedirs(data_dir, exist_ok=True)
 
@@ -70,10 +70,10 @@ def fetch_proposicoes_deputado(deputado_id, data_dir=None):
 
 def fetch_detalhe_proposicao(proposicao_id, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "detalhes")
+        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", str(proposicao_id))
 
     os.makedirs(data_dir, exist_ok=True)
-    filepath = os.path.join(data_dir, f"{proposicao_id}.json")
+    filepath = os.path.join(data_dir, "detalhes.json")
 
     url = f"https://dadosabertos.camara.leg.br/api/v2/proposicoes/{proposicao_id}"
     return fetch_single(
@@ -85,10 +85,10 @@ def fetch_detalhe_proposicao(proposicao_id, data_dir=None):
 
 def fetch_autores_proposicao(proposicao_id, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "autores")
+        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", str(proposicao_id))
 
     os.makedirs(data_dir, exist_ok=True)
-    filepath = os.path.join(data_dir, f"{proposicao_id}.json")
+    filepath = os.path.join(data_dir, "autores.json")
 
     url = f"https://dadosabertos.camara.leg.br/api/v2/proposicoes/{proposicao_id}/autores"
     return fetch_single(
@@ -100,7 +100,7 @@ def fetch_autores_proposicao(proposicao_id, data_dir=None):
 
 def fetch_proposicoes_todas(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes")
+        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "ano")
 
     for ano in ANOS_PADRAO:
         _log.info("Baixando proposições do ano %s...", ano)

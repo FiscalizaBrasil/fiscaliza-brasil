@@ -226,7 +226,7 @@ def _anos_legislatura(id_legislatura):
 
 def _get_deputados_pendentes(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "despesas")
+        data_dir = os.path.join(DATA_DIR, "camara", "deputados")
 
     dados = _load_deputados_dados()
     if not dados:
@@ -272,7 +272,7 @@ def _get_deputados_pendentes(data_dir=None):
         if chave in db_com_legislatura:
             continue
 
-        dep_dir = os.path.join(data_dir, str(dep_id))
+        dep_dir = os.path.join(data_dir, str(dep_id), "despesas")
         leg_dir = os.path.join(dep_dir, str(id_leg))
         anos = _anos_legislatura(id_leg)
 
@@ -343,7 +343,7 @@ def _get_anos_senado_pendentes(data_dir=None):
 
 def _get_anos_proposicoes_pendentes(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes")
+        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "ano")
 
     anos = list(ANOS_PADRAO)
     pendentes = []
@@ -440,7 +440,7 @@ def _get_parlamentares_sem_emendas(data_dir=None):
 
 def _get_deputados_sem_historico(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "historico")
+        data_dir = os.path.join(DATA_DIR, "camara", "deputados")
 
     ids_unicos = _load_deputados_ids()
     if not ids_unicos:
@@ -450,7 +450,7 @@ def _get_deputados_sem_historico(data_dir=None):
     for dep_id in sorted(ids_unicos):
         if is_verified("camara_historico", str(dep_id)):
             continue
-        filepath = os.path.join(data_dir, f"{dep_id}.json")
+        filepath = os.path.join(data_dir, str(dep_id), "historico.json")
         if not os.path.isfile(filepath) or not is_cache_valid(filepath):
             sem_historico.append(dep_id)
     return sem_historico
@@ -458,7 +458,7 @@ def _get_deputados_sem_historico(data_dir=None):
 
 def _get_deputados_sem_detalhes(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "detalhes")
+        data_dir = os.path.join(DATA_DIR, "camara", "deputados")
 
     ids_unicos = _load_deputados_ids()
     if not ids_unicos:
@@ -468,7 +468,7 @@ def _get_deputados_sem_detalhes(data_dir=None):
     for dep_id in sorted(ids_unicos):
         if is_verified("camara_detalhes", str(dep_id)):
             continue
-        filepath = os.path.join(data_dir, f"{dep_id}.json")
+        filepath = os.path.join(data_dir, str(dep_id), "detalhes.json")
         if not os.path.isfile(filepath) or not is_cache_valid(filepath):
             sem_detalhes.append(dep_id)
     return sem_detalhes
@@ -476,7 +476,7 @@ def _get_deputados_sem_detalhes(data_dir=None):
 
 def _get_deputados_sem_proposicoes(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "deputados")
+        data_dir = os.path.join(DATA_DIR, "camara", "proposicoes", "autor")
 
     ids_unicos = _load_deputados_ids()
     if not ids_unicos:
@@ -587,8 +587,8 @@ def _processar_deputado(dep):
         'import_kwargs': {'deputado_id': dep_id},
         'item_key': f'deputado/{dep_id}',
         'label': f'deputado {dep_id}',
-        'source_path': os.path.join(DATA_DIR, "camara", "despesas", str(dep_id)),
-        'failed_subpath': f'camara/despesas/{dep_id}',
+        'source_path': os.path.join(DATA_DIR, "camara", "deputados", str(dep_id), "despesas"),
+        'failed_subpath': f'camara/deputados/{dep_id}/despesas',
         'source_name': 'camara',
         'is_dir': True,
         'success_msg': "Despesas do deputado %s importadas.",
@@ -658,12 +658,12 @@ def _processar_ano_proposicoes(ano):
         'import_kwargs': {'ano': ano},
         'item_key': f'proposicoes/{ano}',
         'label': f'proposicoes {ano}',
-        'failed_subpath': f'camara/proposicoes/{ano}',
+        'failed_subpath': f'camara/proposicoes/ano/{ano}',
         'source_name': 'camara',
         'move_matching': {
-            'dir': os.path.join(DATA_DIR, "camara", "proposicoes"),
+            'dir': os.path.join(DATA_DIR, "camara", "proposicoes", "ano"),
             'prefix': f'{ano}',
-            'failed_subpath_dir': 'camara/proposicoes',
+            'failed_subpath_dir': 'camara/proposicoes/ano',
         },
         'success_msg': "Proposicoes de %s importadas.",
         'success_msg_args': (ano,),
@@ -701,8 +701,8 @@ def _processar_historico_deputado(dep_id):
         'import_kwargs': {'deputado_id': dep_id},
         'item_key': f'historico/{dep_id}',
         'label': f'historico {dep_id}',
-        'source_path': os.path.join(DATA_DIR, "camara", "historico", f"{dep_id}.json"),
-        'failed_subpath': f'camara/historico/{dep_id}.json',
+        'source_path': os.path.join(DATA_DIR, "camara", "deputados", str(dep_id), "historico.json"),
+        'failed_subpath': f'camara/deputados/{dep_id}/historico.json',
         'source_name': 'camara',
         'success_msg': "Historico do deputado %s importado.",
         'success_msg_args': (dep_id,),
@@ -721,8 +721,8 @@ def _processar_detalhes_deputado(dep_id):
         'import_kwargs': {'deputado_id': dep_id},
         'item_key': f'detalhes/{dep_id}',
         'label': f'detalhes {dep_id}',
-        'source_path': os.path.join(DATA_DIR, "camara", "detalhes", f"{dep_id}.json"),
-        'failed_subpath': f'camara/detalhes/{dep_id}.json',
+        'source_path': os.path.join(DATA_DIR, "camara", "deputados", str(dep_id), "detalhes.json"),
+        'failed_subpath': f'camara/deputados/{dep_id}/detalhes.json',
         'source_name': 'camara',
         'success_msg': "Detalhes do deputado %s importados.",
         'success_msg_args': (dep_id,),
@@ -741,12 +741,12 @@ def _processar_proposicoes_deputado(dep_id):
         'import_kwargs': {'deputado_id': dep_id},
         'item_key': f'proposicoes_dep/{dep_id}',
         'label': f'proposicoes_deputado {dep_id}',
-        'failed_subpath': f'camara/proposicoes/deputados/{dep_id}',
+        'failed_subpath': f'camara/proposicoes/autor/{dep_id}',
         'source_name': 'camara',
         'move_matching': {
-            'dir': os.path.join(DATA_DIR, "camara", "proposicoes", "deputados"),
+            'dir': os.path.join(DATA_DIR, "camara", "proposicoes", "autor"),
             'prefix': f'{dep_id}',
-            'failed_subpath_dir': 'camara/proposicoes/deputados',
+            'failed_subpath_dir': 'camara/proposicoes/autor',
         },
         'success_msg': "Proposicoes do deputado %s importadas.",
         'success_msg_args': (dep_id,),
@@ -759,7 +759,7 @@ def _garantir_senadores_despesas():
     """
     Garante que todo cod_senador presente em despesa_ceaps tenha
     registro em parlamentar + mandato no banco.
-    Utiliza cache em disco (data/senado/detalhes/{codigo}.json) para
+    Utiliza cache em disco (data/senado/senadores/{codigo}/detalhes.json) para
     evitar chamadas repetidas à API.
     """
     if _buscar_e_inserir_senador_api is None:

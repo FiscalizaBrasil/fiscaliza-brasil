@@ -19,12 +19,12 @@ def _anos_legislatura(id_legislatura):
 
 def fetch_despesas_deputado(deputado_id, anos=None, id_legislatura=None, data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "despesas")
+        data_dir = os.path.join(DATA_DIR, "camara", "deputados", str(deputado_id), "despesas")
 
     if anos is None:
         anos = list(ANOS_PADRAO)
 
-    dep_dir = os.path.join(data_dir, str(deputado_id))
+    dep_dir = data_dir  # data_dir already is deputados/{id}/despesas
     os.makedirs(dep_dir, exist_ok=True)
 
     headers = {"accept": "application/json"}
@@ -49,8 +49,6 @@ def fetch_despesas_deputado(deputado_id, anos=None, id_legislatura=None, data_di
             leg_dir = os.path.join(dep_dir, str(id_legislatura))
             os.makedirs(leg_dir, exist_ok=True)
             filepath = os.path.join(leg_dir, f"{ano}.json")
-        else:
-            filepath = os.path.join(dep_dir, f"{ano}.json")
 
         ano_resultados = fetch_paginated(
             url=url,
@@ -73,21 +71,33 @@ def _load_deputados_all():
     camara_dir = os.path.join(DATA_DIR, "camara")
     if not os.path.isdir(camara_dir):
         return []
-    for fname in sorted(os.listdir(camara_dir)):
-        if fname.startswith("deputados") and fname.endswith(".json"):
-            json_path = os.path.join(camara_dir, fname)
-            try:
-                with open(json_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                dados.extend(data.get("dados", []))
-            except Exception:
-                pass
+    # deputados.json aglutina todas as legislaturas
+    json_path = os.path.join(camara_dir, "deputados.json")
+    if os.path.isfile(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            dados.extend(data.get("dados", []))
+        except Exception:
+            pass
+    # legislatura files moved to deputados/ subdir
+    dep_dir = os.path.join(camara_dir, "deputados")
+    if os.path.isdir(dep_dir):
+        for fname in sorted(os.listdir(dep_dir)):
+            if fname.startswith("legislatura_") and fname.endswith(".json"):
+                json_path = os.path.join(dep_dir, fname)
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    dados.extend(data.get("dados", []))
+                except Exception:
+                    pass
     return dados
 
 
 def fetch_despesas_todas_camara(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(DATA_DIR, "camara", "despesas")
+        data_dir = os.path.join(DATA_DIR, "camara", "deputados")
 
     dados = _load_deputados_all()
     if not dados:
@@ -106,7 +116,7 @@ def fetch_despesas_todas_camara(data_dir=None):
             continue
 
         anos = _anos_legislatura(id_leg)
-        dep_dir = os.path.join(data_dir, str(dep_id))
+        dep_dir = os.path.join(data_dir, str(dep_id), "despesas")
         leg_dir = os.path.join(dep_dir, str(id_leg))
 
         completo = True
@@ -126,7 +136,7 @@ def fetch_despesas_todas_camara(data_dir=None):
 
         _log.info("Baixando despesas do deputado %s (%s) legislatura %s", dep_id, dep.get("nome", ""), id_leg)
         try:
-            fetch_despesas_deputado(dep_id, anos=anos, id_legislatura=id_leg, data_dir=data_dir)
+            fetch_despesas_deputado(dep_id, anos=anos, id_legislatura=id_leg)
         except Exception as e:
             _log.error("Erro ao baixar despesas do deputado %s: %s", dep_id, e)
             continue

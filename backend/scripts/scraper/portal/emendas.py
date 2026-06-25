@@ -122,6 +122,16 @@ def fetch_emendas_parlamentar(nome_autor, ano=None, pagina=None, data_dir=None):
             break
 
     result = {"emendas": all_emendas}
+
+    # Filtra por match exato no nomeAutor (API faz substring match)
+    nome_autor_upper = nome_autor.upper()
+    nome_autor_sem_acento = remover_acentos(nome_autor_upper)
+    all_emendas = [
+        e for e in all_emendas
+        if remover_acentos((e.get("nomeAutor") or "").strip().upper()) == nome_autor_sem_acento
+    ]
+    result = {"emendas": all_emendas}
+
     save_json(result, filepath)
     return result
 
