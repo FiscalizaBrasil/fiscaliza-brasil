@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 from .config import DATA_DIR, LEGISLATURAS, SENADO_LEGISLATURAS, SENADO_ANO_INICIO
 from .cache import is_cache_valid
@@ -16,7 +16,8 @@ from database.utils import legislatura_anos_lista
 
 _log = logging.getLogger("PIPELINE")
 
-MAX_WORKERS = 6
+CAMARA_WORKERS = 6
+SENADO_WORKERS = 2
 
 
 def _carregar_deputados_legislatura(leg: int) -> list:
@@ -94,7 +95,15 @@ def _carregar_expenses_cache(leg: int) -> dict:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             despesas_lista = data.get("despesas", []) if isinstance(data, dict) else data if isinstance(data, list) else []
-            cache[ano] = despesas_lista
+            sen_map = {}
+            for d in despesas_lista:
+                cod = d.get("codSenador")
+                if cod:
+                    cod = int(cod)
+                    if cod not in sen_map:
+                        sen_map[cod] = []
+                    sen_map[cod].append(d)
+            cache[ano] = sen_map
     return cache
 
 
@@ -180,89 +189,103 @@ def _agregar_arquivos_legislaturas():
 def _processar_legislatura(deputados: list, senadores: list, leg: int) -> list:
     from scripts.import_data import _importar_mandato_camara, _importar_mandato_senado
 
+    falhos_lock = threading.Lock()
     falhos = []
-    futures = {}
-    expenses_cache = {}
-    ceaps_pronto = threading.Event()
-    senadores_para_submeter = []
 
-    for sen in senadores:
-        codigo = int(sen.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
-        if codigo:
-            sen["idLegislatura"] = leg
-            senadores_para_submeter.append(sen)
+    def _add_falho(f):
+        with falhos_lock:
+            falhos.append(f)
 
-    def _baixar_ceaps_e_submeter():
-        nonlocal expenses_cache
-        try:
-            _baixar_despesas_senado_anos(leg)
-            expenses_cache = _carregar_expenses_cache(leg)
-        except Exception as e:
-            _log.error("Falha ao baixar CEAPS legislatura %d: %s", leg, e)
+    camara_pronto = threading.Event()
+    senado_pronto = threading.Event()
 
-        for sen in senadores_para_submeter:
-            fut = executor.submit(_importar_mandato_senado, sen, expenses_cache)
-            futures[fut] = ("senado", sen)
-
-        ceaps_pronto.set()
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        threading.Thread(target=_baixar_ceaps_e_submeter, daemon=True).start()
-
-        total = len(deputados) + len(senadores_para_submeter)
-        _log.info("Baixando e importando %d mandatos legislatura %d (%d workers)...", total, leg, MAX_WORKERS)
-
-        for dep in deputados:
-            dep_id = dep.get("id")
-            if not dep_id:
-                continue
-            dep["idLegislatura"] = leg
-            try:
-                _baixar_dados_deputado(dep, leg)
-            except Exception as e:
-                _log.error("Falha ao baixar dados deputado %d: %s", dep_id, e)
-                falhos.append({
-                    "tipo": "camara",
-                    "deputado_id": dep_id,
-                    "legislatura_id": leg,
-                    "nome": dep.get("nome", ""),
-                    "erro": str(e)[:500],
-                })
-                continue
-            fut = executor.submit(_importar_mandato_camara, dep)
-            futures[fut] = ("camara", dep)
-
-        ceaps_pronto.wait()
-
-        for fut in as_completed(futures):
-            tipo, item = futures[fut]
-            try:
-                result = fut.result()
-                if result and tipo == "camara":
-                    _log.debug("OK deputado %d leg %d", result["deputado_id"], result["legislatura_id"])
-                elif result and tipo == "senado":
-                    _log.debug("OK senador %d leg %d", result["codigo_parlamentar"], result["legislatura_id"])
-            except Exception as e:
-                if tipo == "camara":
-                    dep_id = item.get("id", 0)
-                    falhos.append({
+    def _camara_producer():
+        _log.info("Camara legislatura %d: baixando e importando %d deputados (%d workers)...", leg, len(deputados), CAMARA_WORKERS)
+        with ThreadPoolExecutor(max_workers=CAMARA_WORKERS) as camara_pool:
+            camara_futures = []
+            for dep in deputados:
+                dep_id = dep.get("id")
+                if not dep_id:
+                    continue
+                dep["idLegislatura"] = leg
+                try:
+                    _baixar_dados_deputado(dep, leg)
+                except Exception as e:
+                    _log.error("Falha ao baixar dados deputado %d: %s", dep_id, e)
+                    _add_falho({
                         "tipo": "camara",
                         "deputado_id": dep_id,
                         "legislatura_id": leg,
-                        "nome": item.get("nome", ""),
+                        "nome": dep.get("nome", ""),
                         "erro": str(e)[:500],
                     })
+                    continue
+                fut = camara_pool.submit(_importar_mandato_camara, dep)
+                camara_futures.append((fut, dep))
+
+            for fut, dep in camara_futures:
+                try:
+                    result = fut.result()
+                    if result:
+                        _log.debug("OK deputado %d leg %d", result["deputado_id"], result["legislatura_id"])
+                except Exception as e:
+                    dep_id = dep.get("id", 0)
                     _log.error("FALHA deputado %d legislatura %d: %s", dep_id, leg, e)
-                else:
-                    codigo = int(item.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
-                    falhos.append({
+                    _add_falho({
+                        "tipo": "camara",
+                        "deputado_id": dep_id,
+                        "legislatura_id": leg,
+                        "nome": dep.get("nome", ""),
+                        "erro": str(e)[:500],
+                    })
+        camara_pronto.set()
+
+    def _senado_producer():
+        _log.info("Senado legislatura %d: baixando CEAPS...", leg)
+        try:
+            _baixar_despesas_senado_anos(leg)
+        except Exception as e:
+            _log.error("Falha ao baixar CEAPS legislatura %d: %s", leg, e)
+        expenses_cache = _carregar_expenses_cache(leg)
+
+        senadores_para_submeter = []
+        for sen in senadores:
+            codigo = int(sen.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
+            if codigo:
+                sen["idLegislatura"] = leg
+                senadores_para_submeter.append(sen)
+
+        _log.info("Senado legislatura %d: importando %d senadores (%d workers)...", leg, len(senadores_para_submeter), SENADO_WORKERS)
+        with ThreadPoolExecutor(max_workers=SENADO_WORKERS) as senado_pool:
+            senado_futures = []
+            for sen in senadores_para_submeter:
+                fut = senado_pool.submit(_importar_mandato_senado, sen, expenses_cache)
+                senado_futures.append((fut, sen))
+
+            for fut, sen in senado_futures:
+                try:
+                    result = fut.result()
+                    if result:
+                        _log.debug("OK senador %d leg %d", result["codigo_parlamentar"], result["legislatura_id"])
+                except Exception as e:
+                    codigo = int(sen.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
+                    _log.error("FALHA senador %d legislatura %d: %s", codigo, leg, e)
+                    _add_falho({
                         "tipo": "senado",
                         "codigo_parlamentar": codigo,
                         "legislatura_id": leg,
-                        "nome": item.get("IdentificacaoParlamentar", {}).get("NomeParlamentar", ""),
+                        "nome": sen.get("IdentificacaoParlamentar", {}).get("NomeParlamentar", ""),
                         "erro": str(e)[:500],
                     })
-                    _log.error("FALHA senador %d legislatura %d: %s", codigo, leg, e)
+        senado_pronto.set()
+
+    t_camara = threading.Thread(target=_camara_producer, daemon=True, name=f"camara-leg-{leg}")
+    t_senado = threading.Thread(target=_senado_producer, daemon=True, name=f"senado-leg-{leg}")
+    t_camara.start()
+    t_senado.start()
+
+    t_camara.join()
+    t_senado.join()
 
     return falhos
 

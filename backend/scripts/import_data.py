@@ -266,129 +266,6 @@ def _buscar_situacao_deputado(dep_id: int) -> dict:
 
 
 # ============================================================
-# CÂMARA DOS DEPUTADOS
-# ============================================================
-
-def import_deputados_camara(conn) -> bool:
-    """
-    Lê backend/data/camara/deputados.json e insere os dados no banco.
-    
-    A API da Câmara retorna o mesmo deputado várias vezes dentro da mesma
-    legislatura quando ele troca de partido. Para evitar mandatos duplicados,
-    usamos DISTINCT ON (deputado_id, legislatura_id) - criamos apenas UM
-    mandato por deputado por legislatura, com o partido MAIS RECENTE
-    (último registro daquela combinação deputado+legislatura).
-    
-    As trocas de partido são armazenadas na tabela camara.deputados_historico.
-    
-    As colunas situacao e condicao_eleitoral são preenchidas durante a importação
-    através da API de detalhes da Câmara (GET /api/v2/deputados/{id}).
-    Usa cache para evitar chamadas repetidas à API.
-    
-    Retorna True se importou dados, False se o arquivo não existe.
-    """
-    filepath = os.path.join(DATA_DIR, "camara", "deputados.json")
-    if not os.path.isfile(filepath):
-        logging.warning(f"Arquivo não encontrado: {filepath}")
-        return False
-
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    dados = data.get("dados", [])
-    if not dados:
-        logging.warning("Nenhum dado encontrado no arquivo da Câmara.")
-        return False
-
-    logging.info(f"Importando {len(dados)} registros de deputados da Câmara...")
-
-    # Agrupa por (deputado_id, legislatura_id) e pega o ÚLTIMO registro de cada grupo
-    # (partido mais recente)
-    mandatos_por_deputado = {}  # chave: (dep_id, leg_id) -> registro mais recente
-    for dep in dados:
-        dep_id = dep["id"]
-        id_legislatura = dep.get("idLegislatura")
-        if not id_legislatura:
-            continue
-        chave = (dep_id, id_legislatura)
-        # Como os dados vêm ordenados por nome ASC, o último registro
-        # de cada (dep_id, leg_id) será o mais recente (partido atual)
-        mandatos_por_deputado[chave] = dep
-
-    mandatos_ordenados = sorted(
-        mandatos_por_deputado.items(),
-        key=lambda item: item[0][1],  # id_legislatura
-        reverse=True,                 # legislaturas mais recentes primeiro
-    )
-
-    logging.info(f"Total de mandatos únicos (deputado x legislatura): {len(mandatos_ordenados)}")
-
-    with conn.cursor() as cursor:
-        for idx, ((dep_id, id_legislatura), dep) in enumerate(mandatos_ordenados):
-            nome = dep.get("nome", "").strip()
-            partido = dep.get("siglaPartido", "")
-            uf = dep.get("siglaUf", "")
-            url_foto = dep.get("urlFoto", "")
-            email = dep.get("email", "")
-
-            # 1. Insere/ignora legislatura
-            # Fórmula: ano_início = 4 × L + 1795
-            ano_inicio = legislatura_anos(id_legislatura)[0]
-            cursor.execute("""
-                INSERT INTO camara.legislaturas (id, data_inicio)
-                VALUES (%s, %s)
-                ON CONFLICT (id) DO NOTHING
-            """, (id_legislatura, f"{ano_inicio}-02-01"))
-
-            # 2. Busca situação, condição eleitoral e nomes na API (com cache)
-            detalhes = _buscar_situacao_deputado(dep_id)
-            situacao = detalhes["situacao"]
-            condicao_eleitoral = detalhes["condicao_eleitoral"]
-            nome_eleitoral_api = detalhes.get("nome_eleitoral") or ""
-            nome_civil_api = detalhes.get("nome_civil") or nome  # API tem prioridade, fallback JSON
-
-            # 3. Insere/ignora deputado
-            cursor.execute("""
-                INSERT INTO camara.deputados (id, nome_civil, nome_eleitoral, email)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    nome_eleitoral = EXCLUDED.nome_eleitoral
-            """, (dep_id, nome_civil_api, nome_eleitoral_api, email))
-
-            # 4. Usa o nome disponível para o mandato (eleitoral da API, fallback civil)
-            nome_exibicao = nome_eleitoral_api or nome_civil_api
-
-            # 5. Insere/ignora mandato (apenas UM por deputado+legislatura)
-            # situacao e condicao_eleitoral são preenchidos via API para garantir consistência
-            mandato_id = f"{dep_id}_{id_legislatura}"
-            cursor.execute("""
-                INSERT INTO camara.deputados_mandatos
-                    (id, deputado_id, legislatura_id, nome_eleitoral,
-                     sigla_partido, sigla_uf, url_foto, email,
-                     situacao, condicao_eleitoral)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    sigla_partido = EXCLUDED.sigla_partido,
-                    nome_eleitoral = EXCLUDED.nome_eleitoral,
-                    sigla_uf = EXCLUDED.sigla_uf,
-                    url_foto = EXCLUDED.url_foto,
-                    email = EXCLUDED.email,
-                    situacao = COALESCE(EXCLUDED.situacao, camara.deputados_mandatos.situacao),
-                    condicao_eleitoral = COALESCE(EXCLUDED.condicao_eleitoral, camara.deputados_mandatos.condicao_eleitoral)
-            """, (mandato_id, dep_id, id_legislatura, nome_exibicao,
-                  partido, uf, url_foto, email,
-                  situacao, condicao_eleitoral))
-            
-            if (idx + 1) % 10 == 0:
-                conn.commit()
-                logging.info(f"  Progresso: {idx + 1}/{len(mandatos_ordenados)} mandatos processados")
-
-    conn.commit()
-    logging.info("Importação da Câmara concluída.")
-    return True
-
-
-# ============================================================
 # HELPERS DE IMPORTAÇÃO ATÔMICA (operam em cursor, sem commit)
 # ============================================================
 
@@ -615,7 +492,6 @@ def _importar_mandato_camara(dep_data: dict) -> dict:
 
 def _importar_mandato_senado(sen_data: dict, expenses_cache: dict) -> dict:
     ident = sen_data.get("IdentificacaoParlamentar", {})
-    mandato_data = sen_data.get("Mandato", {})
     id_leg = sen_data.get("idLegislatura")
 
     codigo = int(ident.get("CodigoParlamentar", 0))
@@ -623,6 +499,8 @@ def _importar_mandato_senado(sen_data: dict, expenses_cache: dict) -> dict:
         raise ValueError("CodigoParlamentar ausente no registro do senado")
     if not id_leg:
         raise ValueError(f"idLegislatura ausente para senador {codigo}")
+
+    mandato_data = _extrair_mandato_senado(sen_data, id_leg)
 
     from database import db
     conn = db.get_db_connection()
@@ -684,11 +562,9 @@ def _importar_mandato_senado(sen_data: dict, expenses_cache: dict) -> dict:
             despesas = 0
             anos = legislatura_anos_lista(id_leg)
             for ano in anos:
-                for despesa in expenses_cache.get(ano, []):
+                sen_map = expenses_cache.get(ano, {})
+                for despesa in sen_map.get(codigo, []):
                     try:
-                        cod_sen = despesa.get("codigoParlamentar") or despesa.get("codSenador")
-                        if not cod_sen or int(cod_sen) != codigo:
-                            continue
                         with savepoint(cursor, "sp_senado_despesa"):
                             cursor.execute("""
                                 INSERT INTO senado.despesa_ceaps
@@ -699,11 +575,11 @@ def _importar_mandato_senado(sen_data: dict, expenses_cache: dict) -> dict:
                                 ON CONFLICT (ano, mes, cod_senador, documento, valor_reembolsado, fornecedor)
                                 DO NOTHING
                             """, (
-                                despesa.get("ano"), despesa.get("mes"), cod_sen,
-                                despesa.get("nomeParlamentar") or despesa.get("nomeSenador", ""),
+                                despesa.get("ano"), despesa.get("mes"), codigo,
+                                despesa.get("nomeSenador", ""),
                                 despesa.get("tipoDespesa", ""), despesa.get("cpfCnpj"),
                                 despesa.get("fornecedor", ""), despesa.get("documento"),
-                                despesa.get("dataDespesa") or despesa.get("data"),
+                                despesa.get("data"),
                                 despesa.get("detalhamento"), despesa.get("valorReembolsado", 0),
                                 despesa.get("tipoDocumento")
                             ))
@@ -727,6 +603,26 @@ def _importar_mandato_senado(sen_data: dict, expenses_cache: dict) -> dict:
         raise
     finally:
         db.release_db_connection(conn)
+
+
+def _extrair_mandato_senado(sen_data: dict, id_leg: int) -> dict:
+    mandatos_wrapper = sen_data.get("Mandatos", {})
+    mandato_list = mandatos_wrapper.get("Mandato", [])
+    if isinstance(mandato_list, dict):
+        mandato_list = [mandato_list]
+
+    for m in mandato_list:
+        prim = m.get("PrimeiraLegislaturaDoMandato", {})
+        seg = m.get("SegundaLegislaturaDoMandato")
+        if prim and str(prim.get("NumeroLegislatura")) == str(id_leg):
+            return m
+        if seg and str(seg.get("NumeroLegislatura")) == str(id_leg):
+            return m
+
+    if mandato_list:
+        return mandato_list[0]
+
+    return {}
 
 
 # ============================================================
@@ -763,125 +659,6 @@ def _importar_dados_complementares(conn) -> bool:
     if not imported:
         logging.warning("Nenhum dado complementar foi importado.")
     return imported
-
-
-# ============================================================
-# SENADO FEDERAL
-# ============================================================
-
-def import_senadores_senado(conn) -> bool:
-    """
-    Lê backend/data/senado/senadores.json e insere os dados no banco.
-    Retorna True se importou dados, False se o arquivo não existe.
-    """
-    filepath = os.path.join(DATA_DIR, "senado", "senadores.json")
-    if not os.path.isfile(filepath):
-        logging.warning(f"Arquivo não encontrado: {filepath}")
-        return False
-
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    parlamentares = (
-        data.get("ListaParlamentarEmExercicio", {})
-        .get("Parlamentares", {})
-        .get("Parlamentar", [])
-    )
-
-    if not parlamentares:
-        logging.warning("Nenhum dado encontrado no arquivo do Senado.")
-        return False
-
-    logging.info(f"Importando {len(parlamentares)} senadores...")
-
-    # Ordena pela primeira legislatura mais recente primeiro
-    def _leg_key(par):
-        prim = par.get("Mandato", {}).get("PrimeiraLegislaturaDoMandato", {})
-        num = prim.get("NumeroLegislatura") if prim else None
-        try:
-            return int(num)
-        except (TypeError, ValueError):
-            return 0
-
-    parlamentares.sort(key=_leg_key, reverse=True)
-
-    with conn.cursor() as cursor:
-        for par in parlamentares:
-            ident = par.get("IdentificacaoParlamentar", {})
-            mandato = par.get("Mandato", {})
-
-            codigo = int(ident.get("CodigoParlamentar", 0))
-            if not codigo:
-                continue
-
-            nome_parlamentar = ident.get("NomeParlamentar", "").strip()
-            nome_completo = ident.get("NomeCompletoParlamentar", "").strip()
-            sexo = ident.get("SexoParlamentar", "")
-            sigla_partido = ident.get("SiglaPartidoParlamentar", "")
-            uf = ident.get("UfParlamentar", "")
-            url_foto = ident.get("UrlFotoParlamentar", "")
-            url_pagina = ident.get("UrlPaginaParlamentar", "")
-            email = ident.get("EmailParlamentar", "")
-
-            # 1. Insere/ignora legislaturas do mandato
-            prim_leg = mandato.get("PrimeiraLegislaturaDoMandato", {})
-            seg_leg = mandato.get("SegundaLegislaturaDoMandato")
-
-            for leg_info in [prim_leg, seg_leg] if seg_leg else [prim_leg]:
-                if leg_info:
-                    num_leg = leg_info.get("NumeroLegislatura")
-                    data_inicio = leg_info.get("DataInicio")
-                    data_fim = leg_info.get("DataFim")
-                    if num_leg:
-                        cursor.execute("""
-                            INSERT INTO senado.legislatura (numero, data_inicio, data_fim)
-                            VALUES (%s, %s, %s)
-                            ON CONFLICT (numero) DO NOTHING
-                        """, (num_leg, data_inicio, data_fim))
-
-            # 2. Insere/ignora parlamentar
-            cursor.execute("""
-                INSERT INTO senado.parlamentar
-                    (codigo, nome_parlamentar, nome_completo, sexo,
-                     sigla_partido, uf, url_foto, url_pagina, email)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (codigo) DO NOTHING
-            """, (codigo, nome_parlamentar, nome_completo, sexo,
-                  sigla_partido, uf, url_foto, url_pagina, email))
-
-            # 3. Insere/ignora mandato (apenas se tiver pelo menos primeira_legislatura)
-            codigo_mandato = mandato.get("CodigoMandato", "")
-            if codigo_mandato:
-                uf_mandato = mandato.get("UfParlamentar", uf)
-                descricao = mandato.get("DescricaoParticipacao", "")
-                primeira_leg = prim_leg.get("NumeroLegislatura", "") if prim_leg else ""
-                segunda_leg = seg_leg.get("NumeroLegislatura", "") if seg_leg else ""
-
-                # Validação: primeira_legislatura é obrigatória
-                if not primeira_leg or not primeira_leg.strip():
-                    logging.warning(
-                        f"Mandato {codigo_mandato} do senador {codigo} ({nome_parlamentar}) "
-                        f"ignorado: primeira_legislatura vazia."
-                    )
-                    continue
-
-                # Garante que segunda_legislatura não seja NULL (usa '' como fallback)
-                if segunda_leg is None:
-                    segunda_leg = ""
-
-                cursor.execute("""
-                    INSERT INTO senado.mandato
-                        (codigo_mandato, codigo_parlamentar, uf,
-                         descricao_participacao,
-                         primeira_legislatura, segunda_legislatura)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (codigo_mandato, codigo_parlamentar) DO NOTHING
-                """, (codigo_mandato, codigo, uf_mandato,
-                      descricao, primeira_leg, segunda_leg))
-
-    conn.commit()
-    logging.info("Importação do Senado concluída.")
-    return True
 
 
 # ============================================================
@@ -1591,7 +1368,7 @@ def import_despesas_senado(conn, ano: int = None) -> Optional[bool]:
                     
                     for despesa in despesas_lista:
                         try:
-                            cod_senador = despesa.get("codigoParlamentar") or despesa.get("codSenador")
+                            cod_senador = despesa.get("codSenador")
                             if not cod_senador:
                                 continue
                             
@@ -1627,12 +1404,12 @@ def import_despesas_senado(conn, ano: int = None) -> Optional[bool]:
                                     despesa.get("ano"),
                                     despesa.get("mes"),
                                     cod_senador,
-                                    despesa.get("nomeParlamentar") or despesa.get("nomeSenador", ""),
+                                    despesa.get("nomeSenador", ""),
                                     despesa.get("tipoDespesa", ""),
                                     despesa.get("cpfCnpj"),
                                     despesa.get("fornecedor", ""),
                                     despesa.get("documento"),
-                                    despesa.get("dataDespesa") or despesa.get("data"),
+                                    despesa.get("data"),
                                     despesa.get("detalhamento"),
                                     despesa.get("valorReembolsado", 0),
                                     despesa.get("tipoDocumento")
