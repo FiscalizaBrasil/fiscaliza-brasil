@@ -31,11 +31,10 @@ from .senado.processos import (
 from .portal.emendas import fetch_emendas_parlamentar, fetch_emendas_todas
 
 from .lifecycle import (
+    start_pipeline,
     start_background_scraper,
     stop_background_scraper,
     start_background_fotos,
-    start_background_import,
-    ensure_base_data_downloaded,
     main,
 )
 

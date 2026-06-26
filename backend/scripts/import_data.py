@@ -20,7 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 try:
     from database import db
     from database.db import savepoint
-    from database.utils import legislatura_anos
+    from database.utils import legislatura_anos, legislatura_anos_lista
     from scripts.scraper.cache import is_cache_valid, save_json, remover_acentos
     from scripts.scraper.rate_limiter import senado_legis_limiter
     from scripts.scraper.verification import mark_verified
@@ -315,10 +315,16 @@ def import_deputados_camara(conn) -> bool:
         # de cada (dep_id, leg_id) será o mais recente (partido atual)
         mandatos_por_deputado[chave] = dep
 
-    logging.info(f"Total de mandatos únicos (deputado x legislatura): {len(mandatos_por_deputado)}")
+    mandatos_ordenados = sorted(
+        mandatos_por_deputado.items(),
+        key=lambda item: item[0][1],  # id_legislatura
+        reverse=True,                 # legislaturas mais recentes primeiro
+    )
+
+    logging.info(f"Total de mandatos únicos (deputado x legislatura): {len(mandatos_ordenados)}")
 
     with conn.cursor() as cursor:
-        for idx, ((dep_id, id_legislatura), dep) in enumerate(mandatos_por_deputado.items()):
+        for idx, ((dep_id, id_legislatura), dep) in enumerate(mandatos_ordenados):
             nome = dep.get("nome", "").strip()
             partido = dep.get("siglaPartido", "")
             uf = dep.get("siglaUf", "")
@@ -375,11 +381,388 @@ def import_deputados_camara(conn) -> bool:
             
             if (idx + 1) % 10 == 0:
                 conn.commit()
-                logging.info(f"  Progresso: {idx + 1}/{len(mandatos_por_deputado)} mandatos processados")
+                logging.info(f"  Progresso: {idx + 1}/{len(mandatos_ordenados)} mandatos processados")
 
     conn.commit()
     logging.info("Importação da Câmara concluída.")
     return True
+
+
+# ============================================================
+# HELPERS DE IMPORTAÇÃO ATÔMICA (operam em cursor, sem commit)
+# ============================================================
+
+def _importar_despesas_cursor(cursor, deputado_id: int, legislatura_id: int, mandato_id: str) -> int:
+    despesas_dir = os.path.join(
+        DATA_DIR, "camara", "deputados", str(deputado_id), "despesas", str(legislatura_id)
+    )
+    if not os.path.isdir(despesas_dir):
+        return 0
+
+    inseridos = 0
+    json_count = 0
+    for fname in sorted(os.listdir(despesas_dir)):
+        if not fname.endswith(".json"):
+            continue
+        filepath = os.path.join(despesas_dir, fname)
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        dados = data.get("dados", [])
+        if not dados:
+            continue
+        json_count += len(dados)
+        for despesa in dados:
+            inseridos += _inserir_despesa(cursor, despesa, mandato_id)
+
+    if json_count > 0:
+        cursor.execute(
+            "SELECT COUNT(*) FROM camara.deputados_despesas dd "
+            "JOIN camara.deputados_mandatos dm ON dm.id = dd.mandato_id "
+            "WHERE dm.deputado_id = %s AND dm.legislatura_id = %s",
+            (deputado_id, legislatura_id),
+        )
+        db_count = cursor.fetchone()[0]
+        if json_count == db_count:
+            mark_verified("camara_despesas", f"{deputado_id}_{legislatura_id}", json_count, db_count)
+
+    return inseridos
+
+
+def _importar_detalhes_cursor(cursor, deputado_id: int) -> int:
+    filepath = os.path.join(DATA_DIR, "camara", "deputados", str(deputado_id), "detalhes.json")
+    if not os.path.isfile(filepath):
+        return 0
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    dados = data.get("dados", {})
+    if not dados:
+        return 0
+
+    ultimo_status = dados.get("ultimoStatus", {})
+    situacao = ultimo_status.get("situacao")
+    condicao = ultimo_status.get("condicaoEleitoral")
+    nome_eleitoral = ultimo_status.get("nomeEleitoral")
+
+    atualizados = 0
+    with savepoint(cursor, "sp_detdep"):
+        cursor.execute("""
+            UPDATE camara.deputados_mandatos
+            SET situacao = %s,
+                condicao_eleitoral = %s
+            WHERE deputado_id = %s
+              AND (situacao IS DISTINCT FROM %s
+                OR condicao_eleitoral IS DISTINCT FROM %s)
+        """, (situacao, condicao, deputado_id, situacao, condicao))
+        if cursor.rowcount and cursor.rowcount > 0:
+            atualizados += cursor.rowcount
+
+        if nome_eleitoral:
+            cursor.execute("""
+                UPDATE camara.deputados
+                SET nome_eleitoral = %s
+                WHERE id = %s AND (nome_eleitoral IS NULL OR nome_eleitoral != %s)
+            """, (nome_eleitoral, deputado_id, nome_eleitoral))
+
+    if atualizados > 0:
+        cursor.execute(
+            "SELECT COUNT(*) FROM camara.deputados_mandatos WHERE deputado_id = %s AND condicao_eleitoral IS NOT NULL",
+            (deputado_id,),
+        )
+        db_count = cursor.fetchone()[0]
+        if db_count > 0:
+            mark_verified("camara_detalhes", str(deputado_id), 1, db_count)
+
+    return atualizados
+
+
+def _importar_historico_cursor(cursor, deputado_id: int) -> int:
+    filepath = os.path.join(DATA_DIR, "camara", "deputados", str(deputado_id), "historico.json")
+    if not os.path.isfile(filepath):
+        return 0
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    eventos = data.get("dados", [])
+    if not eventos:
+        return 0
+
+    cursor.execute("SELECT id, nome_civil FROM camara.deputados")
+    nome_civil_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+    inseridos = 0
+    for evento in eventos:
+        data_hora = evento.get("dataHora")
+        if not data_hora:
+            continue
+        try:
+            with savepoint(cursor, "sp_hist"):
+                cursor.execute("""
+                    INSERT INTO camara.deputados_historico
+                        (deputado_id, data_hora, situacao, condicao_eleitoral,
+                         descricao_status, sigla_partido, sigla_uf,
+                         nome_eleitoral, nome_civil, url_foto, id_legislatura)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (deputado_id, data_hora) DO NOTHING
+                """, (
+                    deputado_id, data_hora,
+                    evento.get("situacao"), evento.get("condicaoEleitoral"),
+                    evento.get("descricaoStatus"), evento.get("siglaPartido"),
+                    evento.get("siglaUf"), evento.get("nomeEleitoral"),
+                    nome_civil_map.get(deputado_id), evento.get("urlFoto"),
+                    evento.get("idLegislatura")
+                ))
+            if cursor.rowcount and cursor.rowcount > 0:
+                inseridos += 1
+        except Exception as e:
+            logging.error("Erro ao inserir historico deputado %d (data=%s): %s", deputado_id, evento.get("dataHora"), e)
+            continue
+
+    if inseridos > 0:
+        cursor.execute(
+            "SELECT COUNT(*) FROM camara.deputados_historico WHERE deputado_id = %s",
+            (deputado_id,),
+        )
+        db_count = cursor.fetchone()[0]
+        if len(eventos) == db_count:
+            mark_verified("camara_historico", str(deputado_id), len(eventos), db_count)
+
+    return inseridos
+
+
+# ============================================================
+# IMPORTAÇÃO ATÔMICA DE MANDATOS (1 transação = 1 commit)
+# ============================================================
+
+def _importar_mandato_camara(dep_data: dict) -> dict:
+    dep_id = dep_data["id"]
+    id_leg = dep_data.get("idLegislatura")
+    if not id_leg:
+        raise ValueError(f"idLegislatura ausente para deputado {dep_id}")
+
+    from database import db
+    conn = db.get_db_connection()
+    try:
+        nome = dep_data.get("nome", "").strip()
+        partido = dep_data.get("siglaPartido", "")
+        uf = dep_data.get("siglaUf", "")
+        url_foto = dep_data.get("urlFoto", "")
+        email = dep_data.get("email", "")
+
+        with conn.cursor() as cursor:
+            ano_inicio = legislatura_anos(id_leg)[0]
+            cursor.execute("""
+                INSERT INTO camara.legislaturas (id, data_inicio)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (id_leg, f"{ano_inicio}-02-01"))
+
+            detalhes = _buscar_situacao_deputado(dep_id)
+            situacao = detalhes["situacao"]
+            condicao_eleitoral = detalhes["condicao_eleitoral"]
+            nome_eleitoral_api = detalhes.get("nome_eleitoral") or ""
+            nome_civil_api = detalhes.get("nome_civil") or nome
+
+            cursor.execute("""
+                INSERT INTO camara.deputados (id, nome_civil, nome_eleitoral, email)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    nome_eleitoral = EXCLUDED.nome_eleitoral
+            """, (dep_id, nome_civil_api, nome_eleitoral_api, email))
+
+            nome_exibicao = nome_eleitoral_api or nome_civil_api
+            mandato_id = f"{dep_id}_{id_leg}"
+            cursor.execute("""
+                INSERT INTO camara.deputados_mandatos
+                    (id, deputado_id, legislatura_id, nome_eleitoral,
+                     sigla_partido, sigla_uf, url_foto, email,
+                     situacao, condicao_eleitoral)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    sigla_partido = EXCLUDED.sigla_partido,
+                    nome_eleitoral = EXCLUDED.nome_eleitoral,
+                    sigla_uf = EXCLUDED.sigla_uf,
+                    url_foto = EXCLUDED.url_foto,
+                    email = EXCLUDED.email,
+                    situacao = COALESCE(EXCLUDED.situacao, camara.deputados_mandatos.situacao),
+                    condicao_eleitoral = COALESCE(EXCLUDED.condicao_eleitoral, camara.deputados_mandatos.condicao_eleitoral)
+            """, (mandato_id, dep_id, id_leg, nome_exibicao,
+                  partido, uf, url_foto, email,
+                  situacao, condicao_eleitoral))
+
+            despesas = _importar_despesas_cursor(cursor, dep_id, id_leg, mandato_id)
+            detalhes_ok = _importar_detalhes_cursor(cursor, dep_id)
+            historico = _importar_historico_cursor(cursor, dep_id)
+
+        conn.commit()
+        return {
+            "deputado_id": dep_id,
+            "legislatura_id": id_leg,
+            "nome": nome_exibicao,
+            "despesas": despesas,
+            "detalhes": detalhes_ok,
+            "historico": historico,
+        }
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        db.release_db_connection(conn)
+
+
+def _importar_mandato_senado(sen_data: dict, expenses_cache: dict) -> dict:
+    ident = sen_data.get("IdentificacaoParlamentar", {})
+    mandato_data = sen_data.get("Mandato", {})
+    id_leg = sen_data.get("idLegislatura")
+
+    codigo = int(ident.get("CodigoParlamentar", 0))
+    if not codigo:
+        raise ValueError("CodigoParlamentar ausente no registro do senado")
+    if not id_leg:
+        raise ValueError(f"idLegislatura ausente para senador {codigo}")
+
+    from database import db
+    conn = db.get_db_connection()
+    try:
+        nome_parlamentar = ident.get("NomeParlamentar", "").strip()
+        nome_completo = ident.get("NomeCompletoParlamentar", "").strip()
+        sexo = ident.get("SexoParlamentar", "")
+        sigla_partido = ident.get("SiglaPartidoParlamentar", "")
+        uf = ident.get("UfParlamentar", "")
+        url_foto = ident.get("UrlFotoParlamentar", "")
+        url_pagina = ident.get("UrlPaginaParlamentar", "")
+        email = ident.get("EmailParlamentar", "")
+
+        with conn.cursor() as cursor:
+            prim_leg = mandato_data.get("PrimeiraLegislaturaDoMandato", {})
+            seg_leg = mandato_data.get("SegundaLegislaturaDoMandato")
+
+            for leg_info in [prim_leg, seg_leg] if seg_leg else [prim_leg]:
+                if leg_info:
+                    num_leg = leg_info.get("NumeroLegislatura")
+                    data_inicio = leg_info.get("DataInicio")
+                    data_fim = leg_info.get("DataFim")
+                    if num_leg:
+                        cursor.execute("""
+                            INSERT INTO senado.legislatura (numero, data_inicio, data_fim)
+                            VALUES (%s, %s, %s)
+                            ON CONFLICT (numero) DO NOTHING
+                        """, (num_leg, data_inicio, data_fim))
+
+            cursor.execute("""
+                INSERT INTO senado.parlamentar
+                    (codigo, nome_parlamentar, nome_completo, sexo,
+                     sigla_partido, uf, url_foto, url_pagina, email)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (codigo) DO NOTHING
+            """, (codigo, nome_parlamentar, nome_completo, sexo,
+                  sigla_partido, uf, url_foto, url_pagina, email))
+
+            codigo_mandato = mandato_data.get("CodigoMandato", "")
+            if codigo_mandato:
+                uf_mandato = mandato_data.get("UfParlamentar", uf)
+                descricao = mandato_data.get("DescricaoParticipacao", "")
+                primeira_leg = prim_leg.get("NumeroLegislatura", "") if prim_leg else ""
+                segunda_leg = seg_leg.get("NumeroLegislatura", "") if seg_leg else ""
+
+                if primeira_leg and primeira_leg.strip():
+                    if segunda_leg is None:
+                        segunda_leg = ""
+                    cursor.execute("""
+                        INSERT INTO senado.mandato
+                            (codigo_mandato, codigo_parlamentar, uf,
+                             descricao_participacao,
+                             primeira_legislatura, segunda_legislatura)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (codigo_mandato, codigo_parlamentar) DO NOTHING
+                    """, (codigo_mandato, codigo, uf_mandato,
+                          descricao, primeira_leg, segunda_leg))
+
+            despesas = 0
+            anos = legislatura_anos_lista(id_leg)
+            for ano in anos:
+                for despesa in expenses_cache.get(ano, []):
+                    try:
+                        cod_sen = despesa.get("codigoParlamentar") or despesa.get("codSenador")
+                        if not cod_sen or int(cod_sen) != codigo:
+                            continue
+                        with savepoint(cursor, "sp_senado_despesa"):
+                            cursor.execute("""
+                                INSERT INTO senado.despesa_ceaps
+                                    (ano, mes, cod_senador, nome_senador, tipo_despesa,
+                                     cpf_cnpj, fornecedor, documento, data_despesa,
+                                     detalhamento, valor_reembolsado, tipo_documento)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (ano, mes, cod_senador, documento, valor_reembolsado, fornecedor)
+                                DO NOTHING
+                            """, (
+                                despesa.get("ano"), despesa.get("mes"), cod_sen,
+                                despesa.get("nomeParlamentar") or despesa.get("nomeSenador", ""),
+                                despesa.get("tipoDespesa", ""), despesa.get("cpfCnpj"),
+                                despesa.get("fornecedor", ""), despesa.get("documento"),
+                                despesa.get("dataDespesa") or despesa.get("data"),
+                                despesa.get("detalhamento"), despesa.get("valorReembolsado", 0),
+                                despesa.get("tipoDocumento")
+                            ))
+                        if cursor.rowcount and cursor.rowcount > 0:
+                            despesas += 1
+                    except Exception:
+                        continue
+
+        conn.commit()
+        return {
+            "codigo_parlamentar": codigo,
+            "legislatura_id": id_leg,
+            "nome": nome_parlamentar,
+            "despesas": despesas,
+        }
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        db.release_db_connection(conn)
+
+
+# ============================================================
+# DADOS COMPLEMENTARES (após todas as legislaturas)
+# ============================================================
+
+def _importar_dados_complementares(conn) -> bool:
+    imported = False
+    try:
+        if import_proposicoes_camara(conn):
+            imported = True
+    except Exception as e:
+        logging.error("Erro em import_proposicoes_camara: %s", e)
+    try:
+        if import_votacoes_camara(conn):
+            imported = True
+    except Exception as e:
+        logging.error("Erro em import_votacoes_camara: %s", e)
+    try:
+        if import_autores_proposicoes(conn):
+            imported = True
+    except Exception as e:
+        logging.error("Erro em import_autores_proposicoes: %s", e)
+    try:
+        if import_emendas(conn):
+            imported = True
+    except Exception as e:
+        logging.error("Erro em import_emendas: %s", e)
+    try:
+        if import_processos_senado(conn):
+            imported = True
+    except Exception as e:
+        logging.error("Erro em import_processos_senado: %s", e)
+    if not imported:
+        logging.warning("Nenhum dado complementar foi importado.")
+    return imported
 
 
 # ============================================================
@@ -410,6 +793,17 @@ def import_senadores_senado(conn) -> bool:
         return False
 
     logging.info(f"Importando {len(parlamentares)} senadores...")
+
+    # Ordena pela primeira legislatura mais recente primeiro
+    def _leg_key(par):
+        prim = par.get("Mandato", {}).get("PrimeiraLegislaturaDoMandato", {})
+        num = prim.get("NumeroLegislatura") if prim else None
+        try:
+            return int(num)
+        except (TypeError, ValueError):
+            return 0
+
+    parlamentares.sort(key=_leg_key, reverse=True)
 
     with conn.cursor() as cursor:
         for par in parlamentares:
@@ -1279,122 +1673,40 @@ def import_despesas_senado(conn, ano: int = None) -> Optional[bool]:
 # ============================================================
 
 def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
-    """
-    Lê os JSONs de histórico em backend/data/camara/deputados/{id}/historico.json
-    e insere na tabela camara.deputados_historico.
-    
-    Cada evento do histórico representa uma mudança na carreira do deputado:
-    posse, troca de partido, alteração de nome, fim de mandato, etc.
-    
-    Se deputado_id for fornecido, processa APENAS aquele deputado.
-    Caso contrário, processa todos os históricos disponíveis.
-    
-    Estrutura esperada do JSON da API:
-    {
-        "dados": [
-            {
-                "id": 178957,
-                "nome": "ABEL SALVADOR MESQUITA JUNIOR",
-                "siglaPartido": "PDT",
-                "siglaUf": "RR",
-                "idLegislatura": 55,
-                "dataHora": "2015-02-01T00:00",
-                "situacao": null,
-                "condicaoEleitoral": null,
-                "descricaoStatus": "Nome no início da legislatura / Partido no início da legislatura"
-            },
-            ...
-        ]
-    }
-    """
     deputados_dir = os.path.join(DATA_DIR, "camara", "deputados")
     if not os.path.isdir(deputados_dir):
         logging.warning(f"Diretório de deputados não encontrado: {deputados_dir}")
         return None
-    
-    # Determina quais arquivos processar
+
     if deputado_id is not None:
-        arquivos = [(deputado_id, f"{deputado_id}.json")]
+        arquivos = [deputado_id]
     else:
         arquivos = []
         for dep_id_str in sorted(os.listdir(deputados_dir)):
             dep_dir = os.path.join(deputados_dir, dep_id_str)
             if not os.path.isdir(dep_dir):
                 continue
-            historico_file = os.path.join(dep_dir, "historico.json")
-            if os.path.isfile(historico_file):
+            if os.path.isfile(os.path.join(dep_dir, "historico.json")):
                 try:
-                    arquivos.append((int(dep_id_str), historico_file))
+                    arquivos.append(int(dep_id_str))
                 except ValueError:
                     continue
 
     if not arquivos:
         return None
-    
+
     total_inseridos = 0
-    
     with conn.cursor() as cursor:
-        cursor.execute("SELECT id, nome_civil FROM camara.deputados")
-        nome_civil_map = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        for dep_id, filepath in arquivos:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            eventos = data.get("dados", [])
-            if not eventos:
-                continue
-            
-            inseridos_dep = 0
-            
-            for evento in eventos:
-                try:
-                    data_hora = evento.get("dataHora")
-                    if not data_hora:
-                        continue
-                    
-                    with savepoint(cursor, "sp_hist"):
-                        cursor.execute("""
-                            INSERT INTO camara.deputados_historico
-                                (deputado_id, data_hora, situacao, condicao_eleitoral,
-                                 descricao_status, sigla_partido, sigla_uf,
-                                 nome_eleitoral, nome_civil, url_foto, id_legislatura)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (deputado_id, data_hora) DO NOTHING
-                        """, (
-                            dep_id,
-                            data_hora,
-                            evento.get("situacao"),
-                            evento.get("condicaoEleitoral"),
-                            evento.get("descricaoStatus"),
-                            evento.get("siglaPartido"),
-                            evento.get("siglaUf"),
-                            evento.get("nomeEleitoral"),
-                            nome_civil_map.get(dep_id),
-                            evento.get("urlFoto"),
-                            evento.get("idLegislatura")
-                        ))
-                    if cursor.rowcount > 0:
-                        inseridos_dep += 1
-                except Exception as e:
-                    logging.error(f"Erro ao inserir histórico do deputado {dep_id} (data={evento.get('dataHora')}): {e}")
-                    continue
-            else:
-                conn.commit()
-                total_inseridos += inseridos_dep
-                if inseridos_dep > 0:
-                    logging.info(f"Histórico do deputado {dep_id}: {inseridos_dep} eventos importados.")
-                cursor.execute(
-                    "SELECT COUNT(*) FROM camara.deputados_historico WHERE deputado_id = %s",
-                    (dep_id,),
-                )
-                db_count = cursor.fetchone()[0]
-                if len(eventos) > 0 and len(eventos) == db_count:
-                    mark_verified("camara_historico", str(dep_id), len(eventos), db_count)
-                continue
-            
-            logging.warning(f"Histórico do deputado {dep_id}: importação interrompida devido a erro.")
-    
+        for dep_id in arquivos:
+            try:
+                inseridos = _importar_historico_cursor(cursor, dep_id)
+                total_inseridos += inseridos
+                if inseridos > 0:
+                    logging.info(f"Histórico do deputado {dep_id}: {inseridos} eventos importados.")
+            except Exception as e:
+                logging.error(f"Erro ao importar histórico do deputado {dep_id}: {e}")
+
+    conn.commit()
     if total_inseridos > 0:
         logging.info(f"Importação de históricos concluída. {total_inseridos} eventos inseridos.")
     return True if total_inseridos > 0 else None
@@ -1405,109 +1717,38 @@ def import_historico_deputados(conn, deputado_id: int = None) -> Optional[bool]:
 # ============================================================
 
 def import_detalhes_deputados(conn, deputado_id: int = None) -> Optional[bool]:
-    """
-    Lê os JSONs de detalhes em backend/data/camara/deputados/{id}/detalhes.json
-    e atualiza situacao, condicao_eleitoral e nome_eleitoral no banco.
-    
-    Cada JSON contém o ultimoStatus do deputado, que reflete sua situação
-    atual (Exercício, Suplência, Licença, etc.) e condição eleitoral
-    (Titular, Suplente).
-    
-    Se deputado_id for fornecido, processa APENAS aquele deputado.
-    Caso contrário, processa todos os detalhes disponíveis.
-    
-    Estrutura esperada do JSON da API:
-    {
-        "dados": {
-            "ultimoStatus": {
-                "situacao": "Exercício",
-                "condicaoEleitoral": "Titular",
-                "nomeEleitoral": "Nome Parlamentar",
-                ...
-            },
-            ...
-        }
-    }
-    """
     deputados_dir = os.path.join(DATA_DIR, "camara", "deputados")
     if not os.path.isdir(deputados_dir):
         logging.warning(f"Diretório de deputados não encontrado: {deputados_dir}")
         return None
-    
-    # Determina quais arquivos processar
+
     if deputado_id is not None:
-        arquivos = [(deputado_id, os.path.join(deputados_dir, str(deputado_id), "detalhes.json"))]
+        arquivos = [deputado_id]
     else:
         arquivos = []
         for dep_id_str in sorted(os.listdir(deputados_dir)):
             dep_dir = os.path.join(deputados_dir, dep_id_str)
             if not os.path.isdir(dep_dir):
                 continue
-            detalhes_file = os.path.join(dep_dir, "detalhes.json")
-            if os.path.isfile(detalhes_file):
+            if os.path.isfile(os.path.join(dep_dir, "detalhes.json")):
                 try:
-                    arquivos.append((int(dep_id_str), detalhes_file))
+                    arquivos.append(int(dep_id_str))
                 except ValueError:
                     continue
 
     if not arquivos:
         return None
-    
-    total_atualizados = 0
-    
-    with conn.cursor() as cursor:
-        for dep_id, filepath in arquivos:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            dados = data.get("dados", {})
-            if not dados:
-                continue
-            
-            ultimo_status = dados.get("ultimoStatus", {})
-            situacao = ultimo_status.get("situacao")
-            condicao = ultimo_status.get("condicaoEleitoral")
-            
-            if not situacao and not condicao:
-                continue
-            
-            try:
-                with savepoint(cursor, "sp_detdep"):
-                    # Atualiza TODOS os mandatos deste deputado com os mesmos dados
-                    cursor.execute("""
-                        UPDATE camara.deputados_mandatos
-                        SET situacao = %s,
-                            condicao_eleitoral = %s
-                        WHERE deputado_id = %s
-                          AND (situacao IS DISTINCT FROM %s
-                            OR condicao_eleitoral IS DISTINCT FROM %s)
-                    """, (situacao, condicao, dep_id, situacao, condicao))
 
-                    # Atualiza nome_eleitoral em camara.deputados
-                    nome_eleitoral = ultimo_status.get("nomeEleitoral")
-                    if nome_eleitoral:
-                        cursor.execute("""
-                            UPDATE camara.deputados
-                            SET nome_eleitoral = %s
-                            WHERE id = %s AND (nome_eleitoral IS NULL OR nome_eleitoral != %s)
-                        """, (nome_eleitoral, dep_id, nome_eleitoral))
-                
-                if cursor.rowcount > 0:
-                    total_atualizados += cursor.rowcount
-                    logging.info(f"Detalhes do deputado {dep_id}: {cursor.rowcount} mandatos atualizados (situacao={situacao}, condicao={condicao})")
-                cursor.execute(
-                    "SELECT COUNT(*) FROM camara.deputados_mandatos WHERE deputado_id = %s AND condicao_eleitoral IS NOT NULL",
-                    (dep_id,),
-                )
-                db_count = cursor.fetchone()[0]
-                if db_count > 0:
-                    mark_verified("camara_detalhes", str(dep_id), 1, db_count)
+    total_atualizados = 0
+    with conn.cursor() as cursor:
+        for dep_id in arquivos:
+            try:
+                atualizados = _importar_detalhes_cursor(cursor, dep_id)
+                total_atualizados += atualizados
             except Exception as e:
                 logging.error(f"Erro ao atualizar detalhes do deputado {dep_id}: {e}")
-                continue
-        
-        conn.commit()
-    
+
+    conn.commit()
     if total_atualizados > 0:
         logging.info(f"Detalhes de deputados concluído. {total_atualizados} mandatos atualizados.")
     return True if total_atualizados > 0 else None
@@ -2267,91 +2508,7 @@ def import_emendas(conn, arquivo: str = None) -> Optional[bool]:
 
 
 # ============================================================
-# FUNÇÃO PRINCIPAL DE IMPORTAÇÃO
+# A importação principal agora é feita pelo pipeline (pipeline.py).
+# _importar_dados_complementares está definida acima, junto das
+# funções atômicas de mandato.
 # ============================================================
-
-def import_all_data(conn) -> bool:
-    """
-    Importa dados da Câmara e Senado a partir dos JSONs baixados.
-    Retorna True se algum dado foi importado.
-    """
-    imported = False
-
-    try:
-        if import_deputados_camara(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_deputados_camara: {e}")
-    try:
-        if import_senadores_senado(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_senadores_senado: {e}")
-    try:
-        if import_despesas_camara(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_despesas_camara: {e}")
-    try:
-        if import_despesas_senado(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_despesas_senado: {e}")
-    try:
-        if import_proposicoes_camara(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_proposicoes_camara: {e}")
-    try:
-        if import_votacoes_camara(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_votacoes_camara: {e}")
-    try:
-        if import_autores_proposicoes(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_autores_proposicoes: {e}")
-    try:
-        if import_emendas(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_emendas: {e}")
-    try:
-        if import_detalhes_deputados(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_detalhes_deputados: {e}")
-    try:
-        if import_historico_deputados(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_historico_deputados: {e}")
-    try:
-        if import_processos_senado(conn):
-            imported = True
-    except Exception as e:
-        logging.error(f"Erro em import_processos_senado: {e}")
-
-    if not imported:
-        logging.warning("Nenhum dado foi importado. Verifique se os arquivos JSON existem em backend/data/.")
-
-    return imported
-
-
-def main():
-    """Executa a importação diretamente (para testes)."""
-    conn = None
-    try:
-        conn = db.get_db_connection()
-        import_all_data(conn)
-    except Exception as e:
-        logging.error(f"Erro na importação: {e}")
-        raise
-    finally:
-        if conn:
-            db.release_db_connection(conn)
-
-
-if __name__ == "__main__":
-    main()

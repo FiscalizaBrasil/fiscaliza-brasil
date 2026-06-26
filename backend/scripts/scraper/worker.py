@@ -71,6 +71,8 @@ _background_thread_camara = None
 _background_thread_senado = None
 _background_thread_portal = None
 
+import_complete = threading.Event()
+
 _stop_background = False
 _stop_camara = False
 _stop_senado = False
@@ -848,7 +850,7 @@ def _background_worker_generico(logger, name, stop_flag_attr, perfil_fn,
                 break
             if not waited:
                 logger.info(
-                    "Aguardando dados base de Camara e Senado estarem prontos..."
+                    "Aguardando importacao inicial ser concluida..."
                 )
                 waited = True
             time.sleep(10)
@@ -974,6 +976,7 @@ def _background_worker_camara():
         cycle_sleep=CAMARA_CYCLE_SLEEP,
         idle_sleep=CAMARA_IDLE_SLEEP,
         max_workers=6,
+        wait_precondition=lambda: import_complete.is_set(),
     )
 
 
@@ -1011,6 +1014,7 @@ def _background_worker_senado():
         cycle_sleep=SENADO_CYCLE_SLEEP,
         idle_sleep=SENADO_IDLE_SLEEP,
         max_workers=2,
+        wait_precondition=lambda: import_complete.is_set(),
     )
 
 
@@ -1045,4 +1049,5 @@ def _background_worker_portal():
         cycle_sleep=PORTAL_CYCLE_SLEEP,
         idle_sleep=PORTAL_IDLE_SLEEP,
         max_workers=3,
+        wait_precondition=lambda: import_complete.is_set(),
     )

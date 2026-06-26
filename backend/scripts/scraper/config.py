@@ -8,7 +8,7 @@ logging.basicConfig(
 
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
 
-CACHE_DURATION_SECONDS = 3600
+CACHE_DURATION_SECONDS = 86400
 SENADO_ULTIMO_ANO_CACHE_SECONDS = 86400
 
 CAMARA_API_BASE = "https://dadosabertos.camara.leg.br/api/v2"
