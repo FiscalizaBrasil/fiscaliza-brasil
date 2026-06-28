@@ -615,16 +615,20 @@ def _importar_mandato_senado(sen_data: dict, expenses_cache: dict) -> dict:
                 sen_map = expenses_cache.get(ano, {})
                 for despesa in sen_map.get(codigo, []):
                     try:
+                        id_despesa_api = despesa.get("id")
+                        if not id_despesa_api:
+                            continue
                         with savepoint(cursor, "sp_senado_despesa"):
                             cursor.execute("""
                                 INSERT INTO senado.despesa_ceaps
-                                    (ano, mes, cod_senador, nome_senador, tipo_despesa,
+                                    (id_despesa, ano, mes, cod_senador, nome_senador, tipo_despesa,
                                      cpf_cnpj, fornecedor, documento, data_despesa,
                                      detalhamento, valor_reembolsado, tipo_documento)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                ON CONFLICT (ano, mes, cod_senador, documento, valor_reembolsado, fornecedor)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (id_despesa)
                                 DO NOTHING
                             """, (
+                                id_despesa_api,
                                 despesa.get("ano"), despesa.get("mes"), codigo,
                                 despesa.get("nomeSenador", ""),
                                 despesa.get("tipoDespesa", ""), despesa.get("cpfCnpj"),
@@ -1649,16 +1653,20 @@ def import_despesas_senado(conn, ano: int = None) -> Optional[bool]:
                                     continue
 
                             
+                            id_despesa_api = despesa.get("id")
+                            if not id_despesa_api:
+                                continue
                             with savepoint(cursor, "sp_senado_despesa"):
                                 cursor.execute("""
                                     INSERT INTO senado.despesa_ceaps
-                                        (ano, mes, cod_senador, nome_senador, tipo_despesa,
+                                        (id_despesa, ano, mes, cod_senador, nome_senador, tipo_despesa,
                                          cpf_cnpj, fornecedor, documento, data_despesa,
                                          detalhamento, valor_reembolsado, tipo_documento)
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                    ON CONFLICT (ano, mes, cod_senador, documento, valor_reembolsado, fornecedor) 
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    ON CONFLICT (id_despesa)
                                     DO NOTHING
                                 """, (
+                                    id_despesa_api,
                                     despesa.get("ano"),
                                     despesa.get("mes"),
                                     cod_senador,

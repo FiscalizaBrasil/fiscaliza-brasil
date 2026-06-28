@@ -283,6 +283,7 @@ def ensure_schema(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS senado.despesa_ceaps (
             id BIGSERIAL PRIMARY KEY,
+            id_despesa INTEGER NOT NULL UNIQUE,
             ano INTEGER NOT NULL,
             mes INTEGER NOT NULL,
             cod_senador INTEGER REFERENCES senado.parlamentar(codigo) ON DELETE CASCADE,
@@ -294,8 +295,7 @@ def ensure_schema(cursor):
             data_despesa DATE,
             detalhamento TEXT,
             valor_reembolsado NUMERIC(10,2),
-            tipo_documento VARCHAR(50),
-            UNIQUE(ano, mes, cod_senador, documento, valor_reembolsado, fornecedor)
+            tipo_documento VARCHAR(50)
         );
     """);
 

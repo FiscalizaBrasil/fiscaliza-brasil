@@ -88,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import BaseBadge from '@/components/ui/BaseBadge.vue'
@@ -97,7 +97,21 @@ import { useSenadoStore } from '@/stores/senado'
 
 const store = useSenadoStore()
 
-onMounted(() => {
+onMounted(async () => {
+  if (store.legislatura === 0) {
+    if (store.legislaturasDisponiveis.length > 0) {
+      await store.setLegislatura(store.legislaturasDisponiveis[0])
+      return
+    }
+    const stop = watch(() => store.legislaturasDisponiveis.length, (len) => {
+      if (len > 0 && store.legislatura === 0) {
+        store.setLegislatura(store.legislaturasDisponiveis[0])
+        stop()
+      }
+    })
+    store.fetchSenadores()
+    return
+  }
   store.fetchSenadores()
 })
 
