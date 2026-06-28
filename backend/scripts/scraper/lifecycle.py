@@ -8,20 +8,21 @@ from .senado.senadores import download_fotos_senadores
 _log = logging.getLogger("WORKER")
 
 
-def start_pipeline():
-    """Inicia o pipeline de importação em thread separada."""
+def start_initial_import():
+    """Inicia a importação inicial (cache → banco) em thread separada."""
 
-    def _run_pipeline():
+    def _run_import():
         try:
-            from .pipeline import run_pipeline
-            run_pipeline()
+            from scripts.import_data import inicializar_banco
+            inicializar_banco()
         except Exception as e:
-            _log.error("Erro fatal no pipeline: %s", e)
+            _log.error("Erro fatal na importação inicial: %s", e)
+        finally:
             from . import worker as _worker
             _worker.import_complete.set()
 
-    threading.Thread(target=_run_pipeline, daemon=True).start()
-    _log.info("Pipeline de importação iniciada em thread separada.")
+    threading.Thread(target=_run_import, daemon=True).start()
+    _log.info("Importação inicial iniciada em thread separada.")
 
 
 def start_background_scraper():

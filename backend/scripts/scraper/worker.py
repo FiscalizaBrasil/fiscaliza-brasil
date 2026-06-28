@@ -37,6 +37,8 @@ try:
         import_proposicoes_deputado,
         import_votacoes_camara,
         _buscar_e_inserir_senador_api,
+        _importar_mandato_camara,
+        _importar_mandato_senado,
     )
 except ImportError:
     logging.exception("Falha ao importar módulos de dados:")
@@ -215,6 +217,45 @@ def _move_matching_files(directory, prefix, failed_subpath_dir):
                 os.path.join(directory, fname),
                 f"{failed_subpath_dir}/{fname}",
             )
+
+
+# ===================================================================
+# Download helpers – baixam TODOS os dados de um mandato (API calls)
+# ===================================================================
+
+def _baixar_dados_deputado(dep, leg: int):
+    dep_id = dep["id"]
+    anos = _anos_legislatura(leg) if leg else list(ANOS_PADRAO)
+
+    fetch_despesas_deputado(dep_id, anos=anos, id_legislatura=leg)
+    fetch_detalhes_deputado(dep_id)
+    fetch_historico_deputado(dep_id)
+
+    nome_portal = (dep.get("nome") or dep.get("nomeEleitoral") or "").strip().upper()
+    if nome_portal:
+        for ano in anos:
+            fetch_emendas_parlamentar(nome_portal, ano=ano)
+
+
+def _carregar_expenses_cache_senado(leg: int) -> dict:
+    cache = {}
+    anos = _anos_legislatura(leg) if leg else []
+    for ano in anos:
+        filepath = os.path.join(DATA_DIR, "senado", "despesas", f"{ano}.json")
+        if os.path.isfile(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            despesas_lista = data.get("despesas", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+            sen_map = {}
+            for d in despesas_lista:
+                cod = d.get("codSenador")
+                if cod:
+                    cod = int(cod)
+                    if cod not in sen_map:
+                        sen_map[cod] = []
+                    sen_map[cod].append(d)
+            cache[ano] = sen_map
+    return cache
 
 
 # ===================================================================
@@ -576,28 +617,25 @@ def _processar_com_importacao(config):
         return f"{label} ERRO ({result})"
 
 
-def _processar_deputado(dep):
+def _processar_deputado_completo(dep):
     dep_id = dep["id"]
     id_leg = dep.get("idLegislatura")
-    anos = _anos_legislatura(id_leg) if id_leg else list(ANOS_PADRAO)
-    return _processar_com_importacao({
-        'logger': log_camara,
-        'log_msg': "Baixando despesas do deputado %s (%s) legislatura %s",
-        'log_msg_args': (dep_id, dep.get("nome", ""), id_leg or "N/A"),
-        'fetch': lambda: fetch_despesas_deputado(dep_id, anos=anos, id_legislatura=id_leg),
-        'import_fn': import_despesas_camara,
-        'import_kwargs': {'deputado_id': dep_id},
-        'item_key': f'deputado/{dep_id}',
-        'label': f'deputado {dep_id}',
-        'source_path': os.path.join(DATA_DIR, "camara", "deputados", str(dep_id), "despesas"),
-        'failed_subpath': f'camara/deputados/{dep_id}/despesas',
-        'source_name': 'camara',
-        'is_dir': True,
-        'success_msg': "Despesas do deputado %s importadas.",
-        'success_msg_args': (dep_id,),
-        'error_prefix': "Erro no deputado %s: %s",
-        'error_prefix_args': (dep_id,),
-    })
+
+    try:
+        _baixar_dados_deputado(dep, id_leg)
+    except Exception as e:
+        log_camara.error("Falha ao baixar dados deputado %d: %s", dep_id, e)
+
+    try:
+        result = _importar_mandato_camara(dep)
+        if result:
+            log_camara.info("Deputado %d legislatura %s OK", dep_id, id_leg or "N/A")
+            return f"deputado {dep_id} OK"
+    except Exception as e:
+        log_camara.error("Falha ao importar deputado %d: %s", dep_id, e)
+        return f"deputado {dep_id} ERRO"
+
+    return f"deputado {dep_id} NO_DATA"
 
 
 def _processar_ano_senado(ano):
@@ -827,7 +865,7 @@ CAMARA_CYCLE_SLEEP = 5  # seconds between cycles
 CAMARA_IDLE_SLEEP = 30  # seconds when everything is complete
 
 # Senado rate limits
-SENADO_LIMIT_ANOS = 4
+SENADO_LIMIT_SENADORES = 4
 SENADO_CYCLE_SLEEP = 5
 SENADO_IDLE_SLEEP = 30
 
@@ -904,66 +942,20 @@ def _background_worker_generico(logger, name, stop_flag_attr, perfil_fn,
 
 def _build_camara_tasks():
     despesas = _get_deputados_pendentes()
-    proposicoes = _get_anos_proposicoes_pendentes()
-    votacoes = _get_anos_votacoes_pendentes()
-    historicos = _get_deputados_sem_historico()
-    detalhes = _get_deputados_sem_detalhes()
-    proposicoes_dep = _get_deputados_sem_proposicoes()
-
-    complete = (
-        len(despesas) == 0
-        and len(proposicoes) == 0
-        and len(votacoes) == 0
-        and len(historicos) == 0
-        and len(detalhes) == 0
-        and len(proposicoes_dep) == 0
-    )
 
     with _status_lock:
         scraping_status["camara_pendentes"] = len(despesas)
-        scraping_status["camara_completa"] = complete
-        scraping_status["proposicoes_pendentes"] = len(proposicoes)
-        scraping_status["proposicoes_completa"] = len(proposicoes) == 0
-        scraping_status["votacoes_pendentes"] = len(votacoes)
-        scraping_status["votacoes_completa"] = len(votacoes) == 0
+        scraping_status["camara_completa"] = len(despesas) == 0
 
-    if complete:
+    if len(despesas) == 0:
         return [], True
 
     random.shuffle(despesas)
-    random.shuffle(proposicoes)
-    random.shuffle(votacoes)
-    random.shuffle(historicos)
-    random.shuffle(detalhes)
-    random.shuffle(proposicoes_dep)
+    batch = despesas[:CAMARA_LIMIT_DESPESAS]
 
-    tasks = []
-    for dep in despesas[:CAMARA_LIMIT_DESPESAS]:
-        tasks.append((_processar_deputado, dep))
-    for ano in proposicoes[:CAMARA_LIMIT_PROPOSICOES]:
-        tasks.append((_processar_ano_proposicoes, ano))
-    for ano in votacoes[:CAMARA_LIMIT_VOTACOES]:
-        tasks.append((_processar_ano_votacoes, ano))
-    for dep_id in historicos[:CAMARA_LIMIT_HISTORICO]:
-        tasks.append((_processar_historico_deputado, dep_id))
-    for dep_id in detalhes[:CAMARA_LIMIT_DETALHES]:
-        tasks.append((_processar_detalhes_deputado, dep_id))
-    for dep_id in proposicoes_dep[:CAMARA_LIMIT_PROPOSICOES_DEP]:
-        tasks.append((_processar_proposicoes_deputado, dep_id))
+    log_camara.info("Ciclo: %d deputados (total pendentes: %d)", len(batch), len(despesas))
 
-    n_desp = min(len(despesas), CAMARA_LIMIT_DESPESAS)
-    n_anos = min(len(proposicoes), CAMARA_LIMIT_PROPOSICOES)
-    n_vot = min(len(votacoes), CAMARA_LIMIT_VOTACOES)
-    n_hist = min(len(historicos), CAMARA_LIMIT_HISTORICO)
-    n_det = min(len(detalhes), CAMARA_LIMIT_DETALHES)
-    n_prop = min(len(proposicoes_dep), CAMARA_LIMIT_PROPOSICOES_DEP)
-    log_camara.info(
-        "Ciclo: Despesas=%d Proposicoes=%d Votacoes=%d Historico=%d Detalhes=%d "
-        "ProposDep=%d (total=%d)",
-        n_desp, n_anos, n_vot, n_hist, n_det, n_prop, len(tasks),
-    )
-
-    return tasks, complete
+    return [(_processar_deputado_completo, dep) for dep in batch], False
 
 
 def _background_worker_camara():
@@ -975,33 +967,92 @@ def _background_worker_camara():
         build_tasks_fn=_build_camara_tasks,
         cycle_sleep=CAMARA_CYCLE_SLEEP,
         idle_sleep=CAMARA_IDLE_SLEEP,
-        max_workers=6,
+        max_workers=3,
         wait_precondition=lambda: import_complete.is_set(),
     )
 
 
+def _get_senadores_pendentes():
+    senadores_pendentes = []
+    for leg in [57, 56, 55, 54, 53, 52, 51, 50, 49, 48]:
+        filepath = os.path.join(DATA_DIR, "senado", "senadores", f"legislatura_{leg}.json")
+        if not os.path.isfile(filepath):
+            continue
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            parlamentares = []
+            for key in data:
+                if isinstance(data[key], dict):
+                    items = data[key].get("Parlamentares", {}).get("Parlamentar", [])
+                    if items:
+                        parlamentares = items
+                        break
+            for sen in parlamentares:
+                codigo = int(sen.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
+                if not codigo:
+                    continue
+                if is_verified("senado_despesas", str(codigo)):
+                    continue
+                sen["idLegislatura"] = leg
+                senadores_pendentes.append(sen)
+        except Exception:
+            continue
+    return senadores_pendentes
+
+
+def _processar_senador_completo(sen):
+    codigo = int(sen.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
+    id_leg = sen.get("idLegislatura")
+
+    anos = _anos_legislatura(id_leg) if id_leg else []
+    for ano in anos:
+        filepath = os.path.join(DATA_DIR, "senado", "despesas", f"{ano}.json")
+        if not is_cache_valid(filepath):
+            log_senado.info("Baixando CEAPS ano %d para senador %d...", ano, codigo)
+            fetch_despesas_senado_ano(ano)
+
+    cache = _carregar_expenses_cache_senado(id_leg)
+
+    try:
+        result = _importar_mandato_senado(sen, cache)
+        if result:
+            log_senado.info("Senador %d legislatura %s OK", codigo, id_leg or "N/A")
+            return f"senador {codigo} OK"
+    except Exception as e:
+        log_senado.error("Falha ao importar senador %d: %s", codigo, e)
+        return f"senador {codigo} ERRO"
+
+    return f"senador {codigo} NO_DATA"
+
+
 def _build_senado_tasks():
-    # Garantir integridade de senadores históricos (parlamentar + mandato)
     _garantir_senadores_despesas()
 
-    pendentes = _get_anos_senado_pendentes()
-    complete = len(pendentes) == 0
+    anos_pendentes = _get_anos_senado_pendentes()
+    senadores_pendentes = _get_senadores_pendentes()
+
+    complete = len(anos_pendentes) == 0 and len(senadores_pendentes) == 0
 
     with _status_lock:
-        scraping_status["senado_pendentes"] = len(pendentes)
+        scraping_status["senado_pendentes"] = len(anos_pendentes) + len(senadores_pendentes)
         scraping_status["senado_completo"] = complete
 
     if complete:
         return [], True
 
-    random.shuffle(pendentes)
-    batch = pendentes[:SENADO_LIMIT_ANOS]
+    tasks = []
+    random.shuffle(anos_pendentes)
+    for ano in anos_pendentes[:SENADO_LIMIT_SENADORES]:
+        tasks.append((_processar_ano_senado, ano))
 
-    log_senado.info(
-        "Ciclo: %d anos (total pendentes: %d)", len(batch), len(pendentes)
-    )
+    if not tasks:
+        random.shuffle(senadores_pendentes)
+        for sen in senadores_pendentes[:SENADO_LIMIT_SENADORES]:
+            tasks.append((_processar_senador_completo, sen))
 
-    return [(_processar_ano_senado, ano) for ano in batch], complete
+    log_senado.info("Ciclo: %d tarefas (anos=%d, senadores=%d)", len(tasks), len(anos_pendentes), len(senadores_pendentes))
+    return tasks, False
 
 
 def _background_worker_senado():

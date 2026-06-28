@@ -12,6 +12,7 @@ import time
 import requests
 import threading
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 
@@ -407,6 +408,50 @@ def _importar_historico_cursor(cursor, deputado_id: int) -> int:
     return inseridos
 
 
+def _importar_emendas_cursor(cursor, nome_autor: str, anos: list) -> int:
+    nome_sanitizado = remover_acentos(nome_autor).replace(" ", "_").replace("/", "_").upper()
+    emendas_dir = os.path.join(DATA_DIR, "portal", "emendas")
+    inseridos = 0
+    for ano in anos:
+        filepath = os.path.join(emendas_dir, f"{nome_sanitizado}_{ano}.json")
+        if not os.path.isfile(filepath):
+            continue
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for emenda in data.get("emendas", []):
+            autor = (emenda.get("nomeAutor") or "").strip().upper()
+            if remover_acentos(autor) != remover_acentos(nome_autor.upper()):
+                continue
+            try:
+                with savepoint(cursor, "sp_emenda"):
+                    cursor.execute("""
+                        INSERT INTO portal.emendas
+                            (codigo_emenda, ano, tipo_emenda, autor, nome_autor,
+                             numero_emenda, localidade_gasto, funcao, subfuncao,
+                             valor_empenhado, valor_liquidado, valor_pago,
+                             valor_resto_inscrito, valor_resto_cancelado, valor_resto_pago)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        emenda.get("codigoEmenda"), emenda.get("ano"),
+                        emenda.get("tipoEmenda"), emenda.get("nomeAutor", ""),
+                        emenda.get("nomeAutor", ""), emenda.get("numeroEmenda"),
+                        emenda.get("localidadeDoGasto"), emenda.get("funcao"),
+                        emenda.get("subfuncao"),
+                        float(str(emenda.get("valorEmpenhado", "0")).replace(".", "").replace(",", ".")),
+                        float(str(emenda.get("valorLiquidado", "0")).replace(".", "").replace(",", ".")),
+                        float(str(emenda.get("valorPago", "0")).replace(".", "").replace(",", ".")),
+                        float(str(emenda.get("valorRestoInscrito", "0")).replace(".", "").replace(",", ".")),
+                        float(str(emenda.get("valorRestoCancelado", "0")).replace(".", "").replace(",", ".")),
+                        float(str(emenda.get("valorRestoPago", "0")).replace(".", "").replace(",", ".")),
+                    ))
+                if cursor.rowcount and cursor.rowcount > 0:
+                    inseridos += 1
+            except Exception:
+                continue
+    return inseridos
+
+
 # ============================================================
 # IMPORTAÇÃO ATÔMICA DE MANDATOS (1 transação = 1 commit)
 # ============================================================
@@ -470,6 +515,10 @@ def _importar_mandato_camara(dep_data: dict) -> dict:
             despesas = _importar_despesas_cursor(cursor, dep_id, id_leg, mandato_id)
             detalhes_ok = _importar_detalhes_cursor(cursor, dep_id)
             historico = _importar_historico_cursor(cursor, dep_id)
+            emendas = 0
+            if nome_civil_api:
+                anos_leg = legislatura_anos_lista(id_leg)
+                emendas = _importar_emendas_cursor(cursor, nome_civil_api, anos_leg)
 
         conn.commit()
         return {
@@ -479,6 +528,7 @@ def _importar_mandato_camara(dep_data: dict) -> dict:
             "despesas": despesas,
             "detalhes": detalhes_ok,
             "historico": historico,
+            "emendas": emendas,
         }
     except Exception:
         try:
@@ -588,12 +638,17 @@ def _importar_mandato_senado(sen_data: dict, expenses_cache: dict) -> dict:
                     except Exception:
                         continue
 
+            emendas = 0
+            if nome_parlamentar:
+                emendas = _importar_emendas_cursor(cursor, nome_parlamentar, anos)
+
         conn.commit()
         return {
             "codigo_parlamentar": codigo,
             "legislatura_id": id_leg,
             "nome": nome_parlamentar,
             "despesas": despesas,
+            "emendas": emendas,
         }
     except Exception:
         try:
@@ -647,11 +702,6 @@ def _importar_dados_complementares(conn) -> bool:
     except Exception as e:
         logging.error("Erro em import_autores_proposicoes: %s", e)
     try:
-        if import_emendas(conn):
-            imported = True
-    except Exception as e:
-        logging.error("Erro em import_emendas: %s", e)
-    try:
         if import_processos_senado(conn):
             imported = True
     except Exception as e:
@@ -662,7 +712,215 @@ def _importar_dados_complementares(conn) -> bool:
 
 
 # ============================================================
-# IMPORTAÇÃO DE DESPESAS - CÂMARA
+# INICIALIZAÇÃO (importação do cache, sem API calls)
+# ============================================================
+
+CAMARA_WORKERS = 6
+SENADO_WORKERS = 2
+
+LEGISLATURAS = [57, 56, 55, 54, 53, 52, 51, 50, 49, 48]
+SENADO_LEGISLATURAS = [57, 56, 55, 54, 53, 52, 51, 50, 49, 48]
+
+
+def carregar_cache(casa: str, leg: int) -> list:
+    if casa == "camara":
+        filepath = os.path.join(DATA_DIR, "camara", "deputados", f"legislatura_{leg}.json")
+    else:
+        filepath = os.path.join(DATA_DIR, "senado", "senadores", f"legislatura_{leg}.json")
+
+    if not os.path.isfile(filepath):
+        logging.info("Cache %s legislatura %d ausente. Scrapers resolverao.", casa, leg)
+        return []
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if casa == "camara":
+        return data.get("dados", [])
+
+    parlamentares = []
+    for key in data:
+        if isinstance(data[key], dict):
+            items = data[key].get("Parlamentares", {}).get("Parlamentar", [])
+            if items:
+                parlamentares = items
+                break
+    for par in parlamentares:
+        par["idLegislatura"] = leg
+    return parlamentares
+
+
+def _carregar_expenses_cache(leg: int) -> dict:
+    cache = {}
+    anos = legislatura_anos_lista(leg)
+    for ano in anos:
+        filepath = os.path.join(DATA_DIR, "senado", "despesas", f"{ano}.json")
+        if os.path.isfile(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            despesas_lista = data.get("despesas", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+            sen_map = {}
+            for d in despesas_lista:
+                cod = d.get("codSenador")
+                if cod:
+                    cod = int(cod)
+                    if cod not in sen_map:
+                        sen_map[cod] = []
+                    sen_map[cod].append(d)
+            cache[ano] = sen_map
+    return cache
+
+
+def _salvar_falhos(falhos: list):
+    if not falhos:
+        return
+    failed_dir = os.path.join(DATA_DIR, "failed")
+    os.makedirs(failed_dir, exist_ok=True)
+    filepath = os.path.join(failed_dir, "mandatos_falhos_import.json")
+    existing = []
+    if os.path.isfile(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                existing = json.load(f).get("falhos", [])
+        except Exception:
+            pass
+    all_falhos = existing + falhos
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump({"falhos": all_falhos, "total": len(all_falhos)}, f, ensure_ascii=False, indent=2)
+    logging.warning("%d mandato(s) falharam na importacao.", len(falhos))
+
+
+def importar_em_paralelo(deputados: list, senadores: list, leg: int) -> list:
+    expenses_cache = _carregar_expenses_cache(leg)
+    falhos = []
+    futures = {}
+    falhos_lock = threading.Lock()
+
+    def _add_falho(f):
+        with falhos_lock:
+            falhos.append(f)
+
+    for dep in deputados:
+        dep_id = dep.get("id")
+        if not dep_id:
+            continue
+        dep["idLegislatura"] = leg
+
+    with ThreadPoolExecutor(max_workers=CAMARA_WORKERS + SENADO_WORKERS) as executor:
+        for dep in deputados:
+            dep_id = dep.get("id")
+            if not dep_id:
+                continue
+            fut = executor.submit(_importar_mandato_camara, dep)
+            futures[fut] = ("camara", dep)
+
+        for sen in senadores:
+            codigo = int(sen.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
+            if not codigo:
+                continue
+            sen["idLegislatura"] = leg
+            fut = executor.submit(_importar_mandato_senado, sen, expenses_cache)
+            futures[fut] = ("senado", sen)
+
+        total = len(futures)
+        logging.info("Importando %d mandatos da legislatura %d em paralelo...", total, leg)
+
+        for fut in as_completed(futures):
+            tipo, item = futures[fut]
+            try:
+                result = fut.result()
+                if result:
+                    logging.debug("OK %s legislatura %d", tipo, leg)
+            except Exception as e:
+                if tipo == "camara":
+                    _add_falho({"tipo": "camara", "deputado_id": item.get("id", 0), "legislatura_id": leg, "nome": item.get("nome", ""), "erro": str(e)[:500]})
+                    logging.error("FALHA deputado %d legislatura %d: %s", item.get("id", 0), leg, e)
+                else:
+                    codigo = int(item.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
+                    _add_falho({"tipo": "senado", "codigo_parlamentar": codigo, "legislatura_id": leg, "nome": item.get("IdentificacaoParlamentar", {}).get("NomeParlamentar", ""), "erro": str(e)[:500]})
+                    logging.error("FALHA senador %d legislatura %d: %s", codigo, leg, e)
+
+    return falhos
+
+
+def _agregar_arquivos_legislaturas():
+    camara_dir = os.path.join(DATA_DIR, "camara", "deputados")
+    todos = []
+    for leg in LEGISLATURAS:
+        fpath = os.path.join(camara_dir, f"legislatura_{leg}.json")
+        if os.path.isfile(fpath):
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for dep in data.get("dados", []):
+                dep["idLegislatura"] = leg
+                todos.append(dep)
+    if todos:
+        save_json({"dados": todos}, os.path.join(DATA_DIR, "camara", "deputados.json"))
+        logging.info("deputados.json agregado: %d registros.", len(todos))
+
+    senado_dir = os.path.join(DATA_DIR, "senado", "senadores")
+    todos_sen = []
+    codigos = set()
+    for leg in SENADO_LEGISLATURAS:
+        fpath = os.path.join(senado_dir, f"legislatura_{leg}.json")
+        if os.path.isfile(fpath):
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            parlamentares = []
+            for key in data:
+                if isinstance(data[key], dict):
+                    items = data[key].get("Parlamentares", {}).get("Parlamentar", [])
+                    if items:
+                        parlamentares = items
+                        break
+            for par in parlamentares:
+                ident = par.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", "")
+                if ident:
+                    codigos.add(str(ident))
+                par["idLegislatura"] = leg
+                todos_sen.append(par)
+    if todos_sen:
+        resultado = {"ListaParlamentarEmExercicio": {"Parlamentares": {"Parlamentar": todos_sen}}}
+        save_json(resultado, os.path.join(DATA_DIR, "senado", "senadores.json"))
+        logging.info("senadores.json agregado: %d registros de %d senadores.", len(todos_sen), len(codigos))
+
+
+def inicializar_banco():
+    logging.info("=== IMPORTACAO INICIAL INICIADA ===")
+    for leg in LEGISLATURAS:
+        logging.info("--- Legislatura %d ---", leg)
+        deputados = carregar_cache("camara", leg)
+        senadores = carregar_cache("senado", leg)
+        if not deputados and not senadores:
+            logging.info("Sem cache para legislatura %d. Scrapers resolverao.", leg)
+            break
+        logging.info("%d deputados, %d senadores.", len(deputados), len(senadores))
+        falhos = importar_em_paralelo(deputados, senadores, leg)
+        if falhos:
+            _salvar_falhos(falhos)
+
+    logging.info("Agregando arquivos de todas as legislaturas...")
+    try:
+        _agregar_arquivos_legislaturas()
+    except Exception as e:
+        logging.error("Falha ao agregar arquivos: %s", e)
+
+    conn = None
+    try:
+        conn = db.get_db_connection()
+        if conn:
+            logging.info("Importando dados complementares...")
+            _importar_dados_complementares(conn)
+    except Exception as e:
+        logging.error("Falha ao importar dados complementares: %s", e)
+    finally:
+        if conn:
+            try:
+                db.release_db_connection(conn)
+            except Exception:
+                pass
+
+    logging.info("=== IMPORTACAO INICIAL CONCLUIDA ===")
 # ============================================================
 
 def _inserir_despesa(cursor, despesa: dict, mandato_id: str) -> int:

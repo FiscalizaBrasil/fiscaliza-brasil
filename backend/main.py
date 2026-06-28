@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 from api.camara.router import router as camara_router
 from api.senado.router import router as senado_router
 from api.portal.router import router as portal_router
-from scripts.scraper import start_pipeline, start_background_scraper, start_background_fotos, scraping_status
+from scripts.scraper import start_initial_import, start_background_scraper, start_background_fotos, scraping_status
 from scripts.stats_refresh import start_stats_refresh
 from database.cache import get_cache_stats, invalidate_cache
 from scripts.scraper.verification import invalidate as invalidate_verification
@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
     fetch_tipos_senado()
     logger.info("Iniciando downloads em background...")
     start_background_fotos()
-    start_pipeline()
+    start_initial_import()
     start_background_scraper()
     start_stats_refresh()
     yield
