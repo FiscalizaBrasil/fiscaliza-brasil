@@ -120,7 +120,6 @@ export const useSenadoStore = defineStore("senado", () => {
         fetchSenadores(),
         fetchEvolucaoGastos(),
         fetchEstatisticasSenadores(),
-        fetchProjetosLegislativos()
     ])
   }
     const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
@@ -479,6 +478,7 @@ export const useSenadoStore = defineStore("senado", () => {
     }
 
     const fetchProjetosLegislativos = async (pagina = 1) => {
+        if (loadingProjetosLegislativos.value) return
         fetchTiposNomes()
         loadingProjetosLegislativos.value = true
         error.value = null

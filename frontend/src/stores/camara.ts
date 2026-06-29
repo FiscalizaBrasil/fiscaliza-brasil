@@ -64,6 +64,7 @@ export interface Despesa {
   tipo_despesa: string
   valor: number
   url_documento: string | null
+  data_documento?: string | null
 }
 
 export interface Categoria {
@@ -469,6 +470,7 @@ export const useCamaraStore = defineStore("camara", () => {
 
 
   const fetchProjetosLegislativos = async (pagina = 1) => {
+    if (loadingProjetosLegislativos.value) return
     fetchTiposNomes()
     loadingProjetosLegislativos.value = true
     error.value = null
@@ -684,7 +686,6 @@ export const useCamaraStore = defineStore("camara", () => {
       fetchDeputados(),
       fetchEvolucaoGastos(),
       fetchEstatisticasDeputados(),
-      fetchProjetosLegislativos(1)
     ])
   }
 

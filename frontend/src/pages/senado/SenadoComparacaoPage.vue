@@ -360,7 +360,7 @@
                     </thead>
                     <tbody>
                       <tr v-for="(d, i) in despesasA.slice(0, 8)" :key="i">
-                        <td class="whitespace-nowrap">{{ d.mes }}/{{ d.ano }}</td>
+                        <td class="whitespace-nowrap">{{ formatDataDespesa(d) }}</td>
                         <td class="truncate max-w-[150px]" :title="d.tipoDespesa">{{ d.tipoDespesa }}</td>
                         <td class="text-right whitespace-nowrap font-medium">R$ {{ d.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) }}</td>
                       </tr>
@@ -389,7 +389,7 @@
                     </thead>
                     <tbody>
                       <tr v-for="(d, i) in despesasB.slice(0, 8)" :key="i">
-                        <td class="whitespace-nowrap">{{ d.mes }}/{{ d.ano }}</td>
+                        <td class="whitespace-nowrap">{{ formatDataDespesa(d) }}</td>
                         <td class="truncate max-w-[150px]" :title="d.tipoDespesa">{{ d.tipoDespesa }}</td>
                         <td class="text-right whitespace-nowrap font-medium">R$ {{ d.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) }}</td>
                       </tr>
@@ -454,6 +454,13 @@ if (store.filteredSenadores.length === 0) {
 
 const normalizeString = (str: string) => {
   return str ? str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() : ''
+}
+
+const formatDataDespesa = (d: any) => {
+    if (d.data_despesa) {
+        return new Date(d.data_despesa).toLocaleDateString('pt-BR')
+    }
+    return `${d.mes}/${d.ano}`
 }
 
 // Filtered lists for dropdowns

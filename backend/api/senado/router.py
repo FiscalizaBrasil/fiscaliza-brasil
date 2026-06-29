@@ -562,7 +562,7 @@ def get_despesas_senador(legislatura: int, senador_codigo: int, pagina: int = 1)
                 query_recente += " AND CAST(d.ano AS INTEGER) BETWEEN %s AND %s"
                 params_rec.extend([start_year, end_year])
                 
-            query_recente += " ORDER BY d.data_despesa DESC LIMIT %s OFFSET %s"
+            query_recente += " ORDER BY COALESCE(d.data_despesa, TO_DATE(CAST(d.ano AS TEXT) || '-' || LPAD(CAST(d.mes AS TEXT), 2, '0') || '-01', 'YYYY-MM-DD')) DESC, CAST(d.ano AS INTEGER) DESC, CAST(d.mes AS INTEGER) DESC LIMIT %s OFFSET %s"
             params_rec.extend([itens_per_page, offset])
             cursor.execute(query_recente, tuple(params_rec))
             resultado = cursor.fetchall()

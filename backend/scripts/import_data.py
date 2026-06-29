@@ -516,9 +516,10 @@ def _importar_mandato_camara(dep_data: dict) -> dict:
             detalhes_ok = _importar_detalhes_cursor(cursor, dep_id)
             historico = _importar_historico_cursor(cursor, dep_id)
             emendas = 0
-            if nome_civil_api:
+            nome_emendas = nome_eleitoral_api or nome_civil_api
+            if nome_emendas:
                 anos_leg = legislatura_anos_lista(id_leg)
-                emendas = _importar_emendas_cursor(cursor, nome_civil_api, anos_leg)
+                emendas = _importar_emendas_cursor(cursor, nome_emendas, anos_leg)
 
         conn.commit()
         return {

@@ -20,7 +20,7 @@
         full-page
       />
 
-      <template v-if="!store.loadingProjetosLegislativos || store.projetosLegislativosList.length > 0">
+      <div v-show="!store.loadingProjetosLegislativos || store.projetosLegislativosList.length > 0">
         <!-- Stats -->
         <component :is="statsComponent" />
 
@@ -31,7 +31,7 @@
             <component :is="listComponent" />
           </div>
         </section>
-      </template>
+      </div>
     </main>
   </div>
 </template>
@@ -42,6 +42,13 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import HeroLegislaturaSelect from '@/components/ui/HeroLegislaturaSelect.vue'
 import { useCamaraStore } from '@/stores/camara'
 import { useSenadoStore } from '@/stores/senado'
+
+const CamaraProjetosLegislativosStats = defineAsyncComponent(() => import('@/components/camara/ProjetosLegislativosStats.vue'))
+const SenadoProjetosLegislativosStats = defineAsyncComponent(() => import('@/components/senado/ProjetosLegislativosStats.vue'))
+const CamaraProjetosLegislativosFilters = defineAsyncComponent(() => import('@/components/camara/ProjetosLegislativosFilters.vue'))
+const SenadoProjetosLegislativosFilters = defineAsyncComponent(() => import('@/components/senado/ProjetosLegislativosFilters.vue'))
+const CamaraProjetosLegislativosList = defineAsyncComponent(() => import('@/components/camara/ProjetosLegislativosList.vue'))
+const SenadoProjetosLegislativosList = defineAsyncComponent(() => import('@/components/senado/ProjetosLegislativosList.vue'))
 
 const props = defineProps<{
   tipo: 'camara' | 'senado'
@@ -66,20 +73,20 @@ const descricao = computed(() => {
 
 const statsComponent = computed(() => {
   return props.tipo === 'camara'
-    ? defineAsyncComponent(() => import('@/components/camara/ProjetosLegislativosStats.vue'))
-    : defineAsyncComponent(() => import('@/components/senado/ProjetosLegislativosStats.vue'))
+    ? CamaraProjetosLegislativosStats
+    : SenadoProjetosLegislativosStats
 })
 
 const filtersComponent = computed(() => {
   return props.tipo === 'camara'
-    ? defineAsyncComponent(() => import('@/components/camara/ProjetosLegislativosFilters.vue'))
-    : defineAsyncComponent(() => import('@/components/senado/ProjetosLegislativosFilters.vue'))
+    ? CamaraProjetosLegislativosFilters
+    : SenadoProjetosLegislativosFilters
 })
 
 const listComponent = computed(() => {
   return props.tipo === 'camara'
-    ? defineAsyncComponent(() => import('@/components/camara/ProjetosLegislativosList.vue'))
-    : defineAsyncComponent(() => import('@/components/senado/ProjetosLegislativosList.vue'))
+    ? CamaraProjetosLegislativosList
+    : SenadoProjetosLegislativosList
 })
 
 onMounted(() => {

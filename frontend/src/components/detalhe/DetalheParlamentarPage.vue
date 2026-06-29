@@ -254,7 +254,7 @@
                                     </td>
                                 </tr>
                                 <tr v-for="(despesa, index) in store.currentDespesas" :key="index" class="hover:bg-muted/50 transition-colors" v-else>
-                                    <td class="whitespace-nowrap px-4 py-3">{{ despesa.mes }}/{{ despesa.ano }}</td>
+                                    <td class="whitespace-nowrap px-4 py-3">{{ formatDespesaData(despesa) }}</td>
                                     <td class="truncate max-w-xs px-4 py-3">{{ despesa.tipoDespesa || despesa.tipo_despesa }}</td>
                                     <td v-if="tipo === 'senado'" class="truncate max-w-xs hidden sm:table-cell px-4 py-3">{{ despesa.fornecedor || '--' }}</td>
                                     <td class="text-right whitespace-nowrap font-medium px-4 py-3">R$ {{ (despesa.valorReembolsado || despesa.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) }}</td>
@@ -406,6 +406,15 @@ const formatDate = (dateString: string) => {
     if (!dateString) return '--'
     const date = new Date(dateString)
     return date.toLocaleDateString('pt-BR')
+}
+
+const formatDespesaData = (despesa: any) => {
+    const dateField = despesa.data_documento || despesa.dataDespesa
+    if (dateField) {
+        const date = new Date(dateField)
+        return date.toLocaleDateString('pt-BR')
+    }
+    return `${despesa.mes}/${despesa.ano}`
 }
 
 const formatLegislatura = (legis: number) => {

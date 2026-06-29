@@ -733,7 +733,7 @@ def get_comparativo_deputados(legislatura: int, id1: int, id2: int, ano: int = N
             # 3. Buscar Últimas Despesas (histórico completo, mais recentes primeiro)
             for dep_id in [id1, id2]:
                 cursor.execute("""
-                    SELECT d.ano, d.mes, d.tipo_despesa, d.valor_documento as valor, d.url_documento
+                    SELECT d.ano, d.mes, d.tipo_despesa, d.valor_documento as valor, d.url_documento, d.data_documento
                     FROM camara.deputados_despesas d
                     JOIN camara.deputados_mandatos m ON d.mandato_id = m.id
                     WHERE m.deputado_id = %s
@@ -753,7 +753,8 @@ def get_comparativo_deputados(legislatura: int, id1: int, id2: int, ano: int = N
                         "mes": r[1],
                         "tipo_despesa": r[2],
                         "valor": float(r[3]),
-                        "url_documento": r[4]
+                        "url_documento": r[4],
+                        "data_documento": r[5].isoformat() if hasattr(r[5], 'isoformat') else str(r[5]) if r[5] else None
                     }
                     for r in recentes
                 ]
@@ -888,7 +889,8 @@ def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Quer
             query_recente = """
                 SELECT
                     desp.ano, desp.mes, desp.tipo_despesa,
-                    desp.valor_documento as valor, desp.url_documento
+                    desp.valor_documento as valor, desp.url_documento,
+                    desp.data_documento
                 FROM camara.deputados_despesas AS desp
                 JOIN camara.deputados_mandatos AS mand ON desp.mandato_id = mand.id
                 WHERE mand.deputado_id = %s
@@ -898,7 +900,7 @@ def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Quer
                 query_recente += " AND mand.legislatura_id = %s"
                 params_recente.append(legislatura)
 
-            query_recente += " ORDER BY desp.ano DESC, desp.mes DESC LIMIT %s OFFSET %s"
+            query_recente += " ORDER BY COALESCE(desp.data_documento, TO_DATE(desp.ano::text || '-' || LPAD(desp.mes::text, 2, '0') || '-01', 'YYYY-MM-DD')) DESC, desp.id DESC LIMIT %s OFFSET %s"
             params_recente.extend([itens_per_page, offset])
             cursor.execute(query_recente, tuple(params_recente))
             despesas_raw = cursor.fetchall()
@@ -927,7 +929,8 @@ def get_despesas_deputado(legislatura: int, deputado_id: int, pagina: int = Quer
                         "mes": r[1],
                         "tipo_despesa": r[2],
                         "valor": float(r[3]),
-                        "url_documento": r[4]
+                        "url_documento": r[4],
+                        "data_documento": r[5].isoformat() if hasattr(r[5], 'isoformat') else str(r[5]) if r[5] else None
                     }
                     for r in despesas_raw
                 ],

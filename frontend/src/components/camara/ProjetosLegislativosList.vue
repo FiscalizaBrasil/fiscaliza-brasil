@@ -199,7 +199,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { FileText, User, ExternalLink, ChevronDown, Vote, ChevronRight } from 'lucide-vue-next'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import BaseBadge from '@/components/ui/BaseBadge.vue'
@@ -209,12 +209,6 @@ import type { VotoDeputado } from '@/stores/camara'
 
 const store = useCamaraStore()
 const expandedVotacaoIds = ref<Set<string>>(new Set())
-
-onMounted(() => {
-  if (store.projetosLegislativosList.length === 0) {
-    store.fetchProjetosLegislativos(1)
-  }
-})
 
 // Watch for changes in current votes to expand the first one by default
 watch(() => store.currentVotos, (newVotos) => {
