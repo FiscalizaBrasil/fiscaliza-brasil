@@ -15,7 +15,7 @@ on:
 #                          ~/.ssh/authorized_keys on the VPS
 #   VPS_SSH_PORT         – SSH port (usually 22)
 #
-# Required repository variables (Settings → Secrets and variables → Actions → Variables):
+# Required repository variables
 #   IMAGE_BACKEND        – e.g. yourusername/tcc-backend
 #   IMAGE_FRONTEND       – e.g. yourusername/tcc-frontend
 #   DEPLOY_PATH          – absolute path to the project on the VPS
