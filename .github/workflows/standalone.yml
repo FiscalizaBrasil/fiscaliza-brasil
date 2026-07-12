@@ -22,8 +22,8 @@ on:
 #                          (e.g. /home/ubuntu/tcc-I)
 
 env:
-  IMAGE_BACKEND:  ${{ vars.IMAGE_BACKEND  || 'fiscaliza-backend'  }}
-  IMAGE_FRONTEND: ${{ vars.IMAGE_FRONTEND || 'fiscaliza-frontend' }}
+  IMAGE_BACKEND:  ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_BACKEND  || 'fiscaliza-backend'  }}
+  IMAGE_FRONTEND: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_FRONTEND || 'fiscaliza-frontend' }}
   DEPLOY_PATH:    ${{ vars.DEPLOY_PATH    || '/opt/fiscaliza-brasil'   }}
 
 jobs:
