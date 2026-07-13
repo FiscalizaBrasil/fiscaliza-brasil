@@ -1,124 +1,95 @@
-
-name: Deploy to VPS
+name: Build & Deploy Standalone
 
 on:
   push:
     branches:
-      - standalone          # triggers on every push to the standalone branch
-  workflow_dispatch:  # allows manual trigger from the GitHub UI
-
-#   DOCKERHUB_USERNAME   – your Docker Hub username
-#   DOCKERHUB_TOKEN      – Docker Hub access token (not your password)
-#   VPS_HOST             – public IP or hostname of your VPS
-#   VPS_USER             – SSH user on the VPS (e.g. ubuntu, deploy)
-#   VPS_SSH_KEY          – private SSH key whose public counterpart is in
-#                          ~/.ssh/authorized_keys on the VPS
-#   VPS_SSH_PORT         – SSH port (usually 22)
-#
-# Required repository variables
-#   IMAGE_BACKEND        – e.g. yourusername/tcc-backend
-#   IMAGE_FRONTEND       – e.g. yourusername/tcc-frontend
-#   DEPLOY_PATH          – absolute path to the project on the VPS
-#                          (e.g. /home/ubuntu/tcc-I)
-
-env:
-  IMAGE_BACKEND:  ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_BACKEND  || 'fiscaliza-backend'  }}
-  IMAGE_FRONTEND: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_FRONTEND || 'fiscaliza-frontend' }}
-  DEPLOY_PATH:    ${{ vars.DEPLOY_PATH    || '/opt/fiscaliza-brasil'   }}
+      - standalone
 
 jobs:
-  # 1. Build & Push
-  build-and-push:
-    name: Build & Push Docker Images
+  build:
+    name: Build & Push Images
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # Required for cross-compiling to ARM64 on the x86 GitHub runner
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      # Enable Docker layer caching
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Login no Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Backend
-      - name: Build & push backend image
-        uses: docker/build-push-action@v6
+      - name: Build and Push Backend
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: backend/Dockerfile
+          platforms: linux/arm64
           push: true
-          platforms: linux/arm64 # change if you want to target a different architecture (e.g. linux/amd64 for x86 VPS)
           tags: |
-            ${{ env.IMAGE_BACKEND }}:latest
-            ${{ env.IMAGE_BACKEND }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to:   type=gha,mode=max
+            levi1tabosa/fiscaliza-backend:latest
+            levi1tabosa/fiscaliza-backend:${{ github.sha }}
 
-      # Frontend
-      - name: Build & push frontend image
-        uses: docker/build-push-action@v6
+      - name: Build and Push Frontend
+        uses: docker/build-push-action@v5
         with:
           context: ./frontend
-          file: frontend/Dockerfile
+          file: ./frontend/Dockerfile
+          platforms: linux/arm64
           push: true
-          platforms: linux/arm64   # target ARM VPS
           tags: |
-            ${{ env.IMAGE_FRONTEND }}:latest
-            ${{ env.IMAGE_FRONTEND }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to:   type=gha,mode=max
+            levi1tabosa/fiscaliza-frontend:latest
+            levi1tabosa/fiscaliza-frontend:${{ github.sha }}
 
-  # 2. Deploy
   deploy:
     name: Deploy to VPS
     runs-on: ubuntu-latest
-    needs: build-and-push   # only runs after images are pushed successfully
-
+    needs: build
+    environment:
+      name: standalone
+    
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # Copy the compose file to the VPS so docker compose pull/up can use it
-      - name: Copy docker-compose.yml to VPS
+      - name: Create .env file
+        run: |
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
+          echo "VITE_API_URL=${{ secrets.VITE_API_URL }}" >> .env
+          echo "DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/fiscaliza_db" >> .env 
+      - name: Copy files to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
-          host:     ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key:      ${{ secrets.VPS_SSH_KEY }}
-          port:     ${{ secrets.VPS_SSH_PORT }}
-          source:   "docker-compose.yml"
-          target:   ${{ env.DEPLOY_PATH }}
+          host: ${{ secrets.SERVER_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.prod.yml,.env"
+          target: "/opt/fiscaliza-standalone"
+          strip_components: 0
 
-      - name: SSH into VPS and deploy
+      - name: SSH into VPS and Deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host:     ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key:      ${{ secrets.VPS_SSH_KEY }}
-          port:     ${{ secrets.VPS_SSH_PORT }}
-          envs: IMAGE_BACKEND,IMAGE_FRONTEND,DEPLOY_PATH
+          host: ${{ secrets.SERVER_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-
-            cd "$DEPLOY_PATH"
-
-            # Pull the newly built images (no rebuild on the VPS)
+            cd /opt/fiscaliza-standalone
+            
+            # Login para garantir permissão de pull
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            
+            # Preparar o docker-compose
+            cp docker-compose.prod.yml docker-compose.yml
+            
+            # Atualizar imagens e reiniciar containers
             docker compose pull
-
-            # Restart only changed containers; keep DB running
             docker compose up -d --remove-orphans
-
-            # Remove dangling images to reclaim disk space
+            
+            # Limpeza
             docker image prune -f
