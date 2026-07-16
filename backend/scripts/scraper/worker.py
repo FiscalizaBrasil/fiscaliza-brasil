@@ -10,8 +10,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import DATA_DIR, ANOS_PADRAO, SENADO_ULTIMO_ANO_CACHE_SECONDS, SENADO_ANO_INICIO, scraping_status, _status_lock
 from .cache import is_cache_valid, load_json_if_valid, remover_acentos
-from .verification import is_verified, clean_expired
+from .verification import is_verified, clean_expired, mark_verified
 
+from .camara.deputados import fetch_deputados_camara, download_fotos_deputados
 from .camara.despesas import fetch_despesas_deputado
 from .camara.proposicoes import fetch_proposicoes_ano, fetch_proposicoes_deputado
 from .camara.votacoes import fetch_votacoes_ano
@@ -19,6 +20,7 @@ from .camara.historico import fetch_historico_deputado
 from .camara.detalhes import fetch_detalhes_deputado
 
 from .senado.despesas import fetch_despesas_senado_ano
+from .senado.senadores import fetch_senadores_legislatura
 
 from .portal.emendas import fetch_emendas_parlamentar
 
@@ -188,18 +190,35 @@ def _sanitize_nome(nome):
 def _load_deputados_dados():
     """Carrega dados de todos os arquivos de deputados (todas as legislaturas)."""
     dados = []
-    camara_dir = os.path.join(DATA_DIR, "camara")
-    if not os.path.isdir(camara_dir):
-        return []
-    for fname in sorted(os.listdir(camara_dir)):
-        if fname.startswith("deputados") and fname.endswith(".json"):
-            json_path = os.path.join(camara_dir, fname)
-            try:
-                with open(json_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                dados.extend(data.get("dados", []))
-            except Exception:
-                pass
+    # 1. Tenta carregar do arquivo agregado deputados.json
+    deputados_json = os.path.join(DATA_DIR, "camara", "deputados.json")
+    if os.path.isfile(deputados_json):
+        try:
+            with open(deputados_json, "r", encoding="utf-8") as f:
+                return json.load(f).get("dados", [])
+        except Exception:
+            pass
+
+    # 2. Se não existir, tenta carregar dos arquivos individuais de legislatura em camara/deputados/
+    camara_dep_dir = os.path.join(DATA_DIR, "camara", "deputados")
+    if os.path.isdir(camara_dep_dir):
+        for fname in sorted(os.listdir(camara_dep_dir)):
+            if fname.startswith("legislatura_") and fname.endswith(".json"):
+                try:
+                    leg = int(fname.split("_")[1].split(".")[0])
+                except (ValueError, IndexError):
+                    leg = None
+                json_path = os.path.join(camara_dep_dir, fname)
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    leg_dados = data.get("dados", [])
+                    if leg:
+                        for dep in leg_dados:
+                            dep["idLegislatura"] = leg
+                    dados.extend(leg_dados)
+                except Exception:
+                    pass
     return dados
 
 
@@ -439,29 +458,75 @@ def _get_parlamentares_sem_emendas(data_dir=None):
 
     nomes_parlamentares = set()
 
+    # 1. Câmara: tenta deputados.json ou os individuais
     dep_path = os.path.join(DATA_DIR, "camara", "deputados.json")
     if os.path.isfile(dep_path):
-        with open(dep_path, "r", encoding="utf-8") as f:
-            dep_data = json.load(f)
-        for dep in dep_data.get("dados", []):
-            nome = (dep.get("nome") or "").strip().upper()
-            if nome:
-                nomes_parlamentares.add(nome)
+        try:
+            with open(dep_path, "r", encoding="utf-8") as f:
+                dep_data = json.load(f)
+            for dep in dep_data.get("dados", []):
+                nome = (dep.get("nome") or "").strip().upper()
+                if nome:
+                    nomes_parlamentares.add(nome)
+        except Exception:
+            pass
+    else:
+        # Fallback para arquivos individuais
+        camara_dep_dir = os.path.join(DATA_DIR, "camara", "deputados")
+        if os.path.isdir(camara_dep_dir):
+            for fname in sorted(os.listdir(camara_dep_dir)):
+                if fname.startswith("legislatura_") and fname.endswith(".json"):
+                    try:
+                        with open(os.path.join(camara_dep_dir, fname), "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        for dep in data.get("dados", []):
+                            nome = (dep.get("nome") or "").strip().upper()
+                            if nome:
+                                nomes_parlamentares.add(nome)
+                    except Exception:
+                        pass
 
+    # 2. Senado: tenta senadores.json ou os individuais
     sen_path = os.path.join(DATA_DIR, "senado", "senadores.json")
     if os.path.isfile(sen_path):
-        with open(sen_path, "r", encoding="utf-8") as f:
-            sen_data = json.load(f)
-        parlamentares = (
-            sen_data.get("ListaParlamentarEmExercicio", {})
-            .get("Parlamentares", {})
-            .get("Parlamentar", [])
-        )
-        for par in parlamentares:
-            ident = par.get("IdentificacaoParlamentar", {})
-            nome = (ident.get("NomeParlamentar") or "").strip().upper()
-            if nome:
-                nomes_parlamentares.add(nome)
+        try:
+            with open(sen_path, "r", encoding="utf-8") as f:
+                sen_data = json.load(f)
+            parlamentares = (
+                sen_data.get("ListaParlamentarEmExercicio", {})
+                .get("Parlamentares", {})
+                .get("Parlamentar", [])
+            )
+            for par in parlamentares:
+                ident = par.get("IdentificacaoParlamentar", {})
+                nome = (ident.get("NomeParlamentar") or "").strip().upper()
+                if nome:
+                    nomes_parlamentares.add(nome)
+        except Exception:
+            pass
+    else:
+        # Fallback para arquivos individuais
+        senado_sen_dir = os.path.join(DATA_DIR, "senado", "senadores")
+        if os.path.isdir(senado_sen_dir):
+            for fname in sorted(os.listdir(senado_sen_dir)):
+                if fname.startswith("legislatura_") and fname.endswith(".json"):
+                    try:
+                        with open(os.path.join(senado_sen_dir, fname), "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        parlamentares = []
+                        for key in data:
+                            if isinstance(data[key], dict):
+                                items = data[key].get("Parlamentares", {}).get("Parlamentar", [])
+                                if items:
+                                    parlamentares = items
+                                    break
+                        for par in parlamentares:
+                            ident = par.get("IdentificacaoParlamentar", {})
+                            nome = (ident.get("NomeParlamentar") or "").strip().upper()
+                            if nome:
+                                nomes_parlamentares.add(nome)
+                    except Exception:
+                        pass
 
     sem_emendas = []
     ano_atual = datetime.datetime.now().year
@@ -795,6 +860,25 @@ def _processar_proposicoes_deputado(dep_id):
     })
 
 
+def _garantir_listas_legislaturas_senado():
+    """
+    Garante que os arquivos legislatura_{leg}.json do senado existam em disco.
+    Esses arquivos são necessários para que inicializar_banco e _get_senadores_pendentes
+    possam encontrar e importar parlamentares do senado.
+    Baixa via API as listas ausentes antes do ciclo normal do worker.
+    """
+    senadores_dir = os.path.join(DATA_DIR, "senado", "senadores")
+    for leg in [57, 56, 55, 54, 53, 52, 51, 50, 49, 48]:
+        filepath = os.path.join(senadores_dir, f"legislatura_{leg}.json")
+        if not os.path.isfile(filepath) or not is_cache_valid(filepath):
+            log_senado.info("Lista de senadores da legislatura %d ausente. Baixando...", leg)
+            try:
+                fetch_senadores_legislatura(leg, data_dir=senadores_dir)
+                log_senado.info("Lista de senadores da legislatura %d baixada.", leg)
+            except Exception as e:
+                log_senado.error("Erro ao baixar lista de senadores da legislatura %d: %s", leg, e)
+
+
 def _garantir_senadores_despesas():
     """
     Garante que todo cod_senador presente em despesa_ceaps tenha
@@ -940,7 +1024,27 @@ def _background_worker_generico(logger, name, stop_flag_attr, perfil_fn,
             time.sleep(60)
 
 
+def _garantir_listas_legislaturas_camara():
+    """
+    Garante que os arquivos legislatura_{leg}.json da câmara existam em disco.
+    Esses arquivos são necessários para que _get_deputados_pendentes possa encontrar
+    e importar deputados da câmara.
+    """
+    camara_dir = os.path.join(DATA_DIR, "camara")
+    deputados_dir = os.path.join(camara_dir, "deputados")
+    for leg in [57, 56, 55, 54, 53, 52, 51, 50, 49, 48]:
+        filepath = os.path.join(deputados_dir, f"legislatura_{leg}.json")
+        if not os.path.isfile(filepath) or not is_cache_valid(filepath):
+            log_camara.info("Lista de deputados da legislatura %d ausente. Baixando...", leg)
+            try:
+                fetch_deputados_camara(data_dir=camara_dir, legislatura=leg)
+                log_camara.info("Lista de deputados da legislatura %d baixada.", leg)
+            except Exception as e:
+                log_camara.error("Erro ao baixar lista de deputados da legislatura %d: %s", leg, e)
+
+
 def _build_camara_tasks():
+    _garantir_listas_legislaturas_camara()
     despesas = _get_deputados_pendentes()
 
     with _status_lock:
@@ -1005,7 +1109,9 @@ def _processar_senador_completo(sen):
     codigo = int(sen.get("IdentificacaoParlamentar", {}).get("CodigoParlamentar", 0))
     id_leg = sen.get("idLegislatura")
 
-    anos = _anos_legislatura(id_leg) if id_leg else []
+    # Apenas tenta baixar anos a partir de SENADO_ANO_INICIO (2008), pois a API do Senado
+    # retorna 404 para anos anteriores, o que causava requests desnecessárias e lentidão.
+    anos = [ano for ano in _anos_legislatura(id_leg) if ano >= SENADO_ANO_INICIO] if id_leg else []
     for ano in anos:
         filepath = os.path.join(DATA_DIR, "senado", "despesas", f"{ano}.json")
         if not is_cache_valid(filepath):
@@ -1017,6 +1123,7 @@ def _processar_senador_completo(sen):
     try:
         result = _importar_mandato_senado(sen, cache)
         if result:
+            mark_verified("senado_despesas", str(codigo), 1, 1)
             log_senado.info("Senador %d legislatura %s OK", codigo, id_leg or "N/A")
             return f"senador {codigo} OK"
     except Exception as e:
@@ -1027,6 +1134,8 @@ def _processar_senador_completo(sen):
 
 
 def _build_senado_tasks():
+    # Garante que as listas de parlamentares por legislatura existam antes de tudo
+    _garantir_listas_legislaturas_senado()
     _garantir_senadores_despesas()
 
     anos_pendentes = _get_anos_senado_pendentes()

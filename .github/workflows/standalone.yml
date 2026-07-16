@@ -29,6 +29,8 @@ jobs:
           file: backend/Dockerfile
           platforms: linux/arm64
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             levi1tabosa/fiscaliza-backend:latest
             levi1tabosa/fiscaliza-backend:${{ github.sha }}
@@ -58,9 +60,11 @@ jobs:
       - name: Create .env file
         run: |
           echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
-          echo "POSTGRES_USER=${{ secrets.POSTGRES_USERNAME }}" >> .env
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
           echo "VITE_API_URL=${{ secrets.VITE_API_URL }}" >> .env
           echo "DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/fiscaliza_db" >> .env
+          echo "API_KEY=${{ secrets.API_KEY }}" >> .env
+          
 
       - name: Copy files to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -82,15 +86,13 @@ jobs:
             set -e
             cd /opt/fiscaliza-brasil
             
-            # Login para garantir permissão de pull
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
             
-            # Preparar o docker-compose
             cp docker-compose.prod.yml docker-compose.yml
             
-            # Atualizar imagens e reiniciar containers
             docker compose pull
             docker compose up -d --remove-orphans
             
-            # Limpeza
             docker image prune -f
+
+            docker logout
