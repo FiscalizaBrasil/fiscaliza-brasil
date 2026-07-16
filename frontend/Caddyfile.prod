@@ -1,0 +1,13 @@
+# Caddy config for the production frontend container.
+# This serves the built static files from /srv on port 80.
+# The VPS native Caddy sits in front and handles TLS + /api/* routing.
+:80 {
+    root * /srv
+
+    encode gzip
+
+    # SPA fallback: unknown paths return index.html so Vue Router works
+    try_files {path} /index.html
+
+    file_server
+}

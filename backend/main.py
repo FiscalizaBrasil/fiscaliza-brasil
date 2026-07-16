@@ -39,7 +39,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Configuração CORS
-origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://fiscalizabr.duckdns.org",
+    "http://fiscalizabr.duckdns.org",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -96,9 +101,12 @@ def invalidate_cache_endpoint(cache_name: str = None):
 
 if __name__ == "__main__":
     import uvicorn
+    reload = os.getenv("APP_ENV", "production").lower() == "development"
+    print(reload)
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True
+        reload=reload,
     )

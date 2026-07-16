@@ -58,18 +58,14 @@ except ImportError:
     import_votacoes_camara = None
     _buscar_e_inserir_senador_api = None
 
-# ---------------------------------------------------------------------------
 # Named loggers so each scraper emits prefixed messages automatically
-# ---------------------------------------------------------------------------
 _log = logging.getLogger("WORKER")
 
 log_camara = logging.getLogger("CAMARA")
 log_senado = logging.getLogger("SENADO")
 log_portal = logging.getLogger("PORTAL")
 
-# ---------------------------------------------------------------------------
 # Thread handles and stop flags
-# ---------------------------------------------------------------------------
 _background_thread = None
 _background_thread_camara = None
 _background_thread_senado = None
@@ -83,10 +79,7 @@ _stop_senado = False
 _stop_portal = False
 
 
-# ---------------------------------------------------------------------------
-# Retry tracking – rebaixa arquivos em vez de deletar, registra itens com
-# 3+ tentativas para análise manual.
-# ---------------------------------------------------------------------------
+# Retry tracking
 RETRY_DIR = os.path.join(DATA_DIR, "failed")
 RETRY_TRACKER_PATH = os.path.join(RETRY_DIR, "retry_tracker.json")
 NEEDS_REVIEW_PATH = os.path.join(RETRY_DIR, "needs_review.json")
@@ -174,9 +167,7 @@ def _handle_import_failure(logger, item_key, source_path, failed_subpath,
     return "IMPORT_FAIL"
 
 
-# ---------------------------------------------------------------------------
 # Shared helpers
-# ---------------------------------------------------------------------------
 
 _MSG_DB_CONN_FAILED = "Falha ao conectar ao banco de dados"
 _MSG_IMPORT_FALSE = "Importacao retornou False (verificar logs do import_data.py)"
@@ -238,9 +229,7 @@ def _move_matching_files(directory, prefix, failed_subpath_dir):
             )
 
 
-# ===================================================================
 # Download helpers – baixam TODOS os dados de um mandato (API calls)
-# ===================================================================
 
 def _baixar_dados_deputado(dep, leg: int):
     dep_id = dep["id"]
@@ -277,9 +266,7 @@ def _carregar_expenses_cache_senado(leg: int) -> dict:
     return cache
 
 
-# ===================================================================
 # Utility functions – unchanged
-# ===================================================================
 
 def _anos_legislatura(id_legislatura):
     """Calcula os anos cobertos por uma legislatura. Delegado a database.utils."""
@@ -602,10 +589,6 @@ def _get_deputados_sem_proposicoes(data_dir=None):
             sem_proposicoes.append(dep_id)
     return sem_proposicoes
 
-
-# ===================================================================
-# Generic process function – all _processar_* are thin wrappers
-# ===================================================================
 
 def _processar_com_importacao(config):
     logger = config['logger']
@@ -934,9 +917,7 @@ def _garantir_senadores_despesas():
         db.release_db_connection(conn)
 
 
-# ===================================================================
 # Background workers – one per source
-# ===================================================================
 
 # Camara rate limits (per cycle)
 CAMARA_LIMIT_DESPESAS = 5

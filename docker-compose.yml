@@ -1,6 +1,6 @@
 services:
   backend:
-    image: fiscaliza-backend
+    image: levi1tabosa/fiscaliza-backend
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -30,7 +30,7 @@ services:
       start_period: 40s
 
   frontend:
-    image: fiscaliza-frontend
+    image: levi1tabosa/fiscaliza-frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile

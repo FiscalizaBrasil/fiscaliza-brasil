@@ -39,9 +39,13 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
-          file: ./frontend/Dockerfile
+          file: ./frontend/Dockerfile.prod
           platforms: linux/arm64
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_API_URL=${{ secrets.VITE_API_URL }}
           tags: |
             levi1tabosa/fiscaliza-frontend:latest
             levi1tabosa/fiscaliza-frontend:${{ github.sha }}
@@ -61,10 +65,8 @@ jobs:
         run: |
           echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
           echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
-          echo "VITE_API_URL=${{ secrets.VITE_API_URL }}" >> .env
           echo "DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/fiscaliza_db" >> .env
           echo "API_KEY=${{ secrets.API_KEY }}" >> .env
-          
 
       - name: Copy files to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -94,5 +96,3 @@ jobs:
             docker compose up -d --remove-orphans
             
             docker image prune -f
-
-            docker logout
