@@ -43,8 +43,8 @@
             </div>
             <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
               <a
-                v-if="projeto.url_inteiro_teor"
-                :href="projeto.url_inteiro_teor"
+                v-if="projeto.urlInteiroTeor"
+                :href="projeto.urlInteiroTeor"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="inline-flex items-center gap-1 text-sm text-primary hover:underline group bg-primary/10 px-2 py-1 rounded-md transition-colors"

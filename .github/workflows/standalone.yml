@@ -45,7 +45,6 @@ jobs:
           file: ./frontend/Dockerfile.prod
           platforms: linux/arm64
           push: true
-          progress: plain
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
